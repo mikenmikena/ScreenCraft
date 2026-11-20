@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --color-charcoal-darkest: #1a1a1a;
+    --color-charcoal-dark: #222222;
+    --color-charcoal-base: #2a2a2a;
+    --color-charcoal-light: #343434;
+    --color-charcoal-border: #444444;
+    --color-story-orange: #ff7700;
+    --color-story-orange-hover: #ff8c1a;
+    --color-story-amber: #e66000;
+    --color-paper-cream: #faf8f2;
+    --color-paper-shadow: rgba(0, 0, 0, 0.45);
+  }
+
+  body {
+    background-color: var(--color-charcoal-dark);
+    color: #e5e5e5;
+    font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    user-select: none;
+    overflow: hidden;
+  }
+}
+
+/* Custom scrollbars for Adobe Story charcoal styling */
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-track {
+  background: #1f1f1f;
+}
+::-webkit-scrollbar-thumb {
+  background: #3e3e3e;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #555555;
+}
+
+/* Screenplay monospaced page font */
+.font-courier {
+  font-family: 'Courier Prime', 'Courier Std', 'Courier New', Courier, monospace;
+}
+
+/* Screenplay paper print styling */
+.screenplay-page {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6), 0 2px 6px rgba(0, 0, 0, 0.4);
+}

@@ -1,0 +1,6 @@
+{
+  "name": "ScreenCraft - Collaborative Scriptwriting & Pre-Production",
+  "description": "ScreenCraft's 3-column scriptwriting and pre-production suite featuring screenplay formatting, scene outlining, character tagging, stripboard scheduling, NLE metadata pipeline, and cross-platform Rust/Tauri desktop executable architecture.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
