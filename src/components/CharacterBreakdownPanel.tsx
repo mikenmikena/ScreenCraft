@@ -69,7 +69,7 @@ export const CharacterBreakdownPanel: React.FC<CharacterBreakdownPanelProps> = (
   onViewActorInRoster,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterMode, setFilterMode] = useState<'all' | 'tagged' | 'wardrobe'>('all');
+  const [filterMode, setFilterMode] = useState<'all' | 'tagged' | 'wardrobe' | 'voice_over'>('all');
   const [selectedCharName, setSelectedCharName] = useState<string>('');
   const [copiedChar, setCopiedChar] = useState<string | null>(null);
   const [regenPulse, setRegenPulse] = useState(false);
@@ -97,6 +97,7 @@ export const CharacterBreakdownPanel: React.FC<CharacterBreakdownPanelProps> = (
     const q = searchQuery.trim().toLowerCase();
     return breakdowns.filter((b) => {
       if (filterMode === 'tagged' && !b.isTaggedInScript) return false;
+      if (filterMode === 'voice_over' && b.voiceOverLines === 0) return false;
       if (
         filterMode === 'wardrobe' &&
         b.costumeRequirements.length === 0 &&
@@ -203,6 +204,7 @@ export const CharacterBreakdownPanel: React.FC<CharacterBreakdownPanelProps> = (
       `CHARACTER BREAKDOWN — ${b.characterName}`,
       `Project: ${projectTitle}`,
       `Actor: ${b.actorName || 'Unassigned'}`,
+      `Lines: ${b.dialogueLines} Dialogue · ${b.voiceOverLines} Voice-over (V.O.)`,
       `Scenes: ${b.sceneNumbers.length > 0 ? b.sceneNumbers.map((n) => `Sc. ${n}`).join(', ') : 'None'}`,
       '',
       'CHARACTER TRAITS:',
@@ -268,8 +270,9 @@ export const CharacterBreakdownPanel: React.FC<CharacterBreakdownPanelProps> = (
             {(
               [
                 { id: 'all', label: 'All' },
-                { id: 'tagged', label: 'Tagged in Script' },
+                { id: 'tagged', label: 'Tagged' },
                 { id: 'wardrobe', label: 'Wardrobe' },
+                { id: 'voice_over', label: 'V.O.' },
               ] as const
             ).map((tab) => (
               <button
@@ -345,6 +348,14 @@ export const CharacterBreakdownPanel: React.FC<CharacterBreakdownPanelProps> = (
                       <span className={item.isTaggedInScript ? 'text-emerald-400' : 'text-gray-500'}>
                         {item.isTaggedInScript ? 'Tagged' : 'Script char'}
                       </span>
+                      {item.voiceOverLines > 0 && (
+                        <>
+                          <span aria-hidden="true"> · </span>
+                          <span className="text-violet-300 font-mono">
+                            {item.voiceOverLines} V.O.
+                          </span>
+                        </>
+                      )}
                     </div>
 
                     <div className="text-[10px] text-gray-500 mt-1 tabular-nums">
@@ -506,6 +517,11 @@ export const CharacterBreakdownPanel: React.FC<CharacterBreakdownPanelProps> = (
                 <div className="text-base font-semibold text-gray-100 mt-0.5 font-mono tabular-nums">
                   {selectedBreakdown.speakingLines} Lines
                 </div>
+                {selectedBreakdown.voiceOverLines > 0 && (
+                  <div className="text-[10px] font-mono tabular-nums text-violet-300 mt-0.5">
+                    {selectedBreakdown.dialogueLines} Dialogue · {selectedBreakdown.voiceOverLines} V.O.
+                  </div>
+                )}
               </div>
               <div className="p-3.5">
                 <div className="text-[11px] text-gray-400">Story Days</div>
@@ -943,11 +959,25 @@ export const CharacterBreakdownPanel: React.FC<CharacterBreakdownPanelProps> = (
                   <div className="divide-y divide-[#282828]">
                     {selectedBreakdown.keyExcerpts.map((ex, idx) => (
                       <div key={idx} className="py-2 space-y-0.5">
-                        <div className="text-[10px] font-mono text-gray-400">
-                          {ex.type}
-                          {ex.sceneNumber ? ` · Scene ${ex.sceneNumber}` : ''}
+                        <div className="text-[10px] font-mono flex items-center gap-1.5">
+                          <span
+                            className={
+                              ex.type.includes('VOICE_OVER')
+                                ? 'px-1.5 py-0.2 rounded-xs bg-violet-950/80 border border-violet-600/50 text-violet-300 font-semibold'
+                                : 'text-gray-400'
+                            }
+                          >
+                            {ex.type}
+                          </span>
+                          {ex.sceneNumber && (
+                            <span className="text-gray-400">· Scene {ex.sceneNumber}</span>
+                          )}
                         </div>
-                        <p className="text-xs text-gray-200 leading-relaxed font-mono">
+                        <p
+                          className={`text-xs leading-relaxed font-mono ${
+                            ex.type.includes('VOICE_OVER') ? 'text-violet-100 italic' : 'text-gray-200'
+                          }`}
+                        >
                           {ex.text}
                         </p>
                       </div>

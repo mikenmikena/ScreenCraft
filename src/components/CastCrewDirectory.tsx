@@ -13,6 +13,8 @@ import {
   StoryComment,
   Tag,
   CharacterBreakdownOverride,
+  CharacterRelationshipEdge,
+  StoryProject,
 } from '../types/story';
 import {
   Users,
@@ -46,6 +48,8 @@ import {
   AlertTriangle,
   FileText,
   Tag as TagIcon,
+  LayoutGrid,
+  Network,
 } from 'lucide-react';
 import {
   CrewAvailabilityChart,
@@ -57,8 +61,11 @@ import {
 } from './ProductionBudgetPanel';
 import { CallSheetGenerator } from './CallSheetGenerator';
 import { CharacterBreakdownPanel } from './CharacterBreakdownPanel';
+import { CastGalleryView, resolveCastMemberPortrait } from './CastGalleryView';
+import { CharacterConnectionsChart } from './CharacterConnectionsChart';
 
 interface CastCrewDirectoryProps {
+  project?: StoryProject;
   projectTitle?: string;
   projectAuthor?: string;
   draftName?: string;
@@ -70,7 +77,7 @@ interface CastCrewDirectoryProps {
   elements?: ScreenplayElement[];
   comments?: StoryComment[];
   characterBreakdowns?: CharacterBreakdownOverride[];
-  initialDirectoryView?: 'roster' | 'character_breakdown' | 'timeline' | 'budget' | 'call_sheet';
+  initialDirectoryView?: 'roster' | 'gallery' | 'character_breakdown' | 'connections' | 'timeline' | 'budget' | 'call_sheet';
   initialCallSheetDay?: number | null;
   onAddMember: (member: CastCrewMember) => void;
   onUpdateMember: (member: CastCrewMember) => void;
@@ -86,6 +93,8 @@ interface CastCrewDirectoryProps {
   onUpdateCharacterBreakdown?: (override: CharacterBreakdownOverride) => void;
   onResetCharacterBreakdown?: (characterName: string) => void;
   onCreateCharacterTag?: (name: string, sceneIds: string[]) => void;
+  onUpdateCharacterRelationships?: (relationships: CharacterRelationshipEdge[]) => void;
+  onUpdateCharacterNodePositions?: (positions: Record<string, { x: number; y: number }>) => void;
   locationCount?: number;
   onSwitchSubView: (view: 'stripboard' | 'cast_crew' | 'location_map') => void;
   onSelectScene: (sceneId: string) => void;
@@ -173,6 +182,7 @@ const renderAvailabilityIndicator = (status: AvailabilityStatus) => {
 };
 
 export const CastCrewDirectory: React.FC<CastCrewDirectoryProps> = ({
+  project,
   projectTitle = 'Untitled Production',
   projectAuthor = 'Director',
   draftName,
@@ -194,13 +204,15 @@ export const CastCrewDirectory: React.FC<CastCrewDirectoryProps> = ({
   onUpdateCharacterBreakdown,
   onResetCharacterBreakdown,
   onCreateCharacterTag,
+  onUpdateCharacterRelationships,
+  onUpdateCharacterNodePositions,
   locationCount = 0,
   onSwitchSubView,
   onSelectScene,
   onImportScriptCast,
 }) => {
   const [directoryView, setDirectoryView] = useState<
-    'roster' | 'character_breakdown' | 'timeline' | 'budget' | 'call_sheet'
+    'roster' | 'gallery' | 'character_breakdown' | 'connections' | 'timeline' | 'budget' | 'call_sheet'
   >(initialDirectoryView || 'roster');
 
   React.useEffect(() => {
@@ -223,6 +235,7 @@ export const CastCrewDirectory: React.FC<CastCrewDirectoryProps> = ({
 
   // Copy feedback
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [failedAvatarUrls, setFailedAvatarUrls] = useState<Record<string, boolean>>({});
 
   // Confirm delete state (no window.confirm)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -393,11 +406,11 @@ export const CastCrewDirectory: React.FC<CastCrewDirectoryProps> = ({
     setTimeout(() => setCopiedField(null), 1800);
   };
 
-  const openAddModal = () => {
+  const openAddModal = (defaultCategory: 'cast' | 'crew' = 'crew') => {
     setEditingMember(null);
     setFormName('');
-    setFormCategory('crew');
-    setFormDepartment('Camera & Lighting');
+    setFormCategory(defaultCategory);
+    setFormDepartment(defaultCategory === 'cast' ? 'Cast / Principal' : 'Camera & Lighting');
     setFormRole('');
     setFormCharacterName('');
     setFormUnionStatus('');
@@ -408,7 +421,7 @@ export const CastCrewDirectory: React.FC<CastCrewDirectoryProps> = ({
     setFormLocation('');
     setFormAgency('');
     setFormEmergency('');
-    setFormPayRate('850');
+    setFormPayRate(defaultCategory === 'cast' ? '1000' : '850');
     setFormPayBasis('Daily');
     setFormKitFee('0');
     setFormPaymentStatus('Approved');
@@ -587,7 +600,7 @@ export const CastCrewDirectory: React.FC<CastCrewDirectoryProps> = ({
             </button>
           )}
           <button
-            onClick={openAddModal}
+            onClick={() => openAddModal()}
             className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#ff7700] hover:bg-[#ff8c1a] text-black font-semibold rounded transition-colors whitespace-nowrap shrink-0"
           >
             <UserPlus className="w-3.5 h-3.5" />
@@ -611,6 +624,17 @@ export const CastCrewDirectory: React.FC<CastCrewDirectoryProps> = ({
             <span>Roster & Address Book</span>
           </button>
           <button
+            onClick={() => setDirectoryView('gallery')}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs transition-colors whitespace-nowrap shrink-0 ${
+              directoryView === 'gallery'
+                ? 'bg-[#2c2c2c] text-[#ff8000] font-semibold'
+                : 'text-gray-400 hover:text-gray-200 font-medium'
+            }`}
+          >
+            <LayoutGrid className="w-3.5 h-3.5" />
+            <span>Gallery View</span>
+          </button>
+          <button
             onClick={() => setDirectoryView('character_breakdown')}
             className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs transition-colors whitespace-nowrap shrink-0 ${
               directoryView === 'character_breakdown'
@@ -620,6 +644,17 @@ export const CastCrewDirectory: React.FC<CastCrewDirectoryProps> = ({
           >
             <TagIcon className="w-3.5 h-3.5" />
             <span>Character Breakdown</span>
+          </button>
+          <button
+            onClick={() => setDirectoryView('connections')}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs transition-colors whitespace-nowrap shrink-0 ${
+              directoryView === 'connections'
+                ? 'bg-[#2c2c2c] text-[#ff8000] font-semibold'
+                : 'text-gray-400 hover:text-gray-200 font-medium'
+            }`}
+          >
+            <Network className="w-3.5 h-3.5" />
+            <span>Character Connections</span>
           </button>
           <button
             onClick={() => setDirectoryView('timeline')}
@@ -725,7 +760,25 @@ export const CastCrewDirectory: React.FC<CastCrewDirectoryProps> = ({
         </div>
       </div>
 
-      {directoryView === 'character_breakdown' ? (
+      {directoryView === 'gallery' ? (
+        <CastGalleryView
+          members={members}
+          characters={characters}
+          tags={tags}
+          scenes={scenes}
+          unmappedScriptCastCount={unmappedScriptCastCount}
+          onImportScriptCast={onImportScriptCast}
+          onUpdateMember={onUpdateMember}
+          onEditMember={(member) => openEditModal(member)}
+          onSelectMemberInRoster={(memberId) => {
+            setSelectedMemberId(memberId);
+            setDirectoryView('roster');
+          }}
+          onOpenCharacterBreakdown={() => setDirectoryView('character_breakdown')}
+          onSelectScene={onSelectScene}
+          onAddCastMember={() => openAddModal('cast')}
+        />
+      ) : directoryView === 'character_breakdown' ? (
         <CharacterBreakdownPanel
           projectTitle={projectTitle}
           tags={tags}
@@ -743,6 +796,27 @@ export const CastCrewDirectory: React.FC<CastCrewDirectoryProps> = ({
             setSelectedMemberId(memberId);
             setDirectoryView('roster');
           }}
+        />
+      ) : directoryView === 'connections' ? (
+        <CharacterConnectionsChart
+          project={
+            project || {
+              id: 'active-project',
+              title: projectTitle,
+              author: projectAuthor,
+              lastModified: 'Today',
+              elements,
+              scenes,
+              tags,
+              comments,
+              strips,
+              characters,
+              crewMembers: members,
+            }
+          }
+          onUpdateRelationships={(rels) => onUpdateCharacterRelationships?.(rels)}
+          onUpdateNodePositions={(pos) => onUpdateCharacterNodePositions?.(pos)}
+          onSelectScene={onSelectScene}
         />
       ) : directoryView === 'timeline' ? (
         <CrewAvailabilityChart
@@ -766,7 +840,7 @@ export const CastCrewDirectory: React.FC<CastCrewDirectoryProps> = ({
             setSelectedMemberId(memberId);
             setDirectoryView('roster');
           }}
-          onAddMember={openAddModal}
+          onAddMember={() => openAddModal()}
         />
       ) : directoryView === 'call_sheet' ? (
         <CallSheetGenerator
@@ -871,7 +945,7 @@ export const CastCrewDirectory: React.FC<CastCrewDirectoryProps> = ({
               </div>
               {members.length === 0 ? (
                 <button
-                  onClick={openAddModal}
+                  onClick={() => openAddModal()}
                   className="px-4 py-2 bg-[#ff7700] hover:bg-[#ff8c1a] text-black font-semibold rounded transition-colors"
                 >
                   Add First Member
@@ -922,24 +996,42 @@ export const CastCrewDirectory: React.FC<CastCrewDirectoryProps> = ({
                       {/* Member Name & Avatar */}
                       <td className="py-2.5 px-3 align-top">
                         <div className="flex items-center gap-2.5">
-                          {member.avatarUrl ? (
-                            <img
-                              src={member.avatarUrl}
-                              alt={member.name}
-                              referrerPolicy="no-referrer"
-                              className="w-8 h-8 rounded object-cover border border-[#444] shrink-0"
-                            />
-                          ) : (
-                            <div
-                              className={`w-8 h-8 rounded flex items-center justify-center font-semibold text-[11px] shrink-0 border ${
-                                member.category === 'cast'
-                                  ? 'bg-[#2a221b] text-amber-300 border-amber-700/40'
-                                  : 'bg-[#1c262e] text-cyan-300 border-cyan-800/40'
-                              }`}
-                            >
-                              {getInitials(member.name)}
-                            </div>
-                          )}
+                          {(() => {
+                            const portrait =
+                              member.category === 'cast'
+                                ? resolveCastMemberPortrait(member, tags, characters)
+                                : { src: member.avatarUrl };
+                            const avatarSrc =
+                              portrait.src && !failedAvatarUrls[portrait.src]
+                                ? portrait.src
+                                : undefined;
+                            return avatarSrc ? (
+                              <img
+                                src={avatarSrc}
+                                alt={member.name}
+                                referrerPolicy="no-referrer"
+                                onError={() =>
+                                  setFailedAvatarUrls((prev) => ({
+                                    ...prev,
+                                    [avatarSrc]: true,
+                                  }))
+                                }
+                                className={`w-8 h-8 object-cover border border-[#444] shrink-0 ${
+                                  member.category === 'cast' ? 'rounded-full' : 'rounded'
+                                }`}
+                              />
+                            ) : (
+                              <div
+                                className={`w-8 h-8 flex items-center justify-center font-semibold text-[11px] shrink-0 border ${
+                                  member.category === 'cast'
+                                    ? 'rounded-full bg-[#2a221b] text-amber-300 border-amber-700/40'
+                                    : 'rounded bg-[#1c262e] text-cyan-300 border-cyan-800/40'
+                                }`}
+                              >
+                                {getInitials(member.name)}
+                              </div>
+                            );
+                          })()}
                           <div className="min-w-0">
                             <div className="font-semibold text-gray-100 truncate">
                               {member.name}
@@ -1106,24 +1198,42 @@ export const CastCrewDirectory: React.FC<CastCrewDirectoryProps> = ({
             <div className="p-4 border-b border-[#323232] bg-[#222222]">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
-                  {selectedMember.avatarUrl ? (
-                    <img
-                      src={selectedMember.avatarUrl}
-                      alt={selectedMember.name}
-                      referrerPolicy="no-referrer"
-                      className="w-12 h-12 rounded object-cover border border-[#444] shrink-0"
-                    />
-                  ) : (
-                    <div
-                      className={`w-12 h-12 rounded flex items-center justify-center font-bold text-sm shrink-0 border ${
-                        selectedMember.category === 'cast'
-                          ? 'bg-[#2a221b] text-amber-300 border-amber-700/40'
-                          : 'bg-[#1c262e] text-cyan-300 border-cyan-800/40'
-                      }`}
-                    >
-                      {getInitials(selectedMember.name)}
-                    </div>
-                  )}
+                  {(() => {
+                    const portrait =
+                      selectedMember.category === 'cast'
+                        ? resolveCastMemberPortrait(selectedMember, tags, characters)
+                        : { src: selectedMember.avatarUrl };
+                    const avatarSrc =
+                      portrait.src && !failedAvatarUrls[portrait.src]
+                        ? portrait.src
+                        : undefined;
+                    return avatarSrc ? (
+                      <img
+                        src={avatarSrc}
+                        alt={selectedMember.name}
+                        referrerPolicy="no-referrer"
+                        onError={() =>
+                          setFailedAvatarUrls((prev) => ({
+                            ...prev,
+                            [avatarSrc]: true,
+                          }))
+                        }
+                        className={`w-12 h-12 object-cover border border-[#444] shrink-0 ${
+                          selectedMember.category === 'cast' ? 'rounded-full' : 'rounded'
+                        }`}
+                      />
+                    ) : (
+                      <div
+                        className={`w-12 h-12 flex items-center justify-center font-bold text-sm shrink-0 border ${
+                          selectedMember.category === 'cast'
+                            ? 'rounded-full bg-[#2a221b] text-amber-300 border-amber-700/40'
+                            : 'rounded bg-[#1c262e] text-cyan-300 border-cyan-800/40'
+                        }`}
+                      >
+                        {getInitials(selectedMember.name)}
+                      </div>
+                    );
+                  })()}
                   <div className="min-w-0">
                     <h3 className="text-sm font-bold text-gray-100 truncate">
                       {selectedMember.name}

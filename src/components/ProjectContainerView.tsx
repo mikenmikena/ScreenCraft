@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   CharacterBio,
+  CharacterRelationshipEdge,
   PitchSection,
   ProjectBible,
   ResearchNote,
@@ -18,11 +19,15 @@ import {
   Trash2,
   ArrowUpRight,
   Camera,
+  Network,
 } from 'lucide-react';
+import { CharacterConnectionsChart } from './CharacterConnectionsChart';
 
 interface ProjectContainerViewProps {
   project: StoryProject;
   onUpdateProjectBible: (bible: ProjectBible) => void;
+  onUpdateRelationships?: (relationships: CharacterRelationshipEdge[]) => void;
+  onUpdateNodePositions?: (positions: Record<string, { x: number; y: number }>) => void;
   onSwitchScriptFormat: (format: ScriptFormatMode) => void;
   onOpenAuthoring: () => void;
   onOpenStoryboard: () => void;
@@ -79,12 +84,14 @@ const createFallbackBible = (project: StoryProject): ProjectBible => ({
 export const ProjectContainerView: React.FC<ProjectContainerViewProps> = ({
   project,
   onUpdateProjectBible,
+  onUpdateRelationships,
+  onUpdateNodePositions,
   onSwitchScriptFormat,
   onOpenAuthoring,
   onOpenStoryboard,
   onSelectScene,
 }) => {
-  const [section, setSection] = useState<'overview' | 'bios' | 'pitch' | 'research'>('overview');
+  const [section, setSection] = useState<'overview' | 'bios' | 'connections' | 'pitch' | 'research'>('overview');
   const [newTheme, setNewTheme] = useState('');
   const [researchFilter, setResearchFilter] = useState<string>('all');
 
@@ -206,6 +213,11 @@ export const ProjectContainerView: React.FC<ProjectContainerViewProps> = ({
               [
                 { id: 'overview', label: 'Logline & Overview', icon: BookOpen },
                 { id: 'bios', label: `Character Bios (${bible.characterBios.length})`, icon: Users },
+                {
+                  id: 'connections',
+                  label: `Character Connections (${(project.characterRelationships || []).length})`,
+                  icon: Network,
+                },
                 { id: 'pitch', label: `Pitch Docs (${bible.pitchDocs.length})`, icon: FileText },
                 { id: 'research', label: `Research Notes (${bible.researchNotes.length})`, icon: Compass },
               ] as const
@@ -303,6 +315,17 @@ export const ProjectContainerView: React.FC<ProjectContainerViewProps> = ({
       </div>
 
       {/* Main Content Area */}
+      {section === 'connections' ? (
+        <CharacterConnectionsChart
+          project={project}
+          onUpdateRelationships={(rels) => onUpdateRelationships?.(rels)}
+          onUpdateNodePositions={(pos) => onUpdateNodePositions?.(pos)}
+          onSelectScene={(sceneId) => {
+            onSelectScene(sceneId);
+          }}
+          onOpenCharacterBios={() => setSection('bios')}
+        />
+      ) : (
       <div className="flex-1 overflow-y-auto p-6">
         <div className="max-w-5xl mx-auto space-y-6">
           {section === 'overview' && (
@@ -777,6 +800,7 @@ export const ProjectContainerView: React.FC<ProjectContainerViewProps> = ({
           )}
         </div>
       </div>
+      )}
     </div>
   );
 };

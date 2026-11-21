@@ -17,8 +17,18 @@ import {
   Film,
   AudioWaveform,
   PlusCircle,
+  MonitorPlay,
+  History,
+  ShieldAlert,
+  CheckCircle2,
+  PanelLeft,
+  PanelRight,
+  Maximize2,
+  Minimize2,
+  StickyNote,
 } from 'lucide-react';
 import { ElementType, ActiveWorkspace, ScriptFormatMode } from '../types/story';
+import { RevisionPassCounts } from '../utils/revisionPass';
 
 interface FormattingToolbarProps {
   activeWorkspace: ActiveWorkspace;
@@ -32,8 +42,21 @@ interface FormattingToolbarProps {
   scriptFormat?: ScriptFormatMode;
   onChangeScriptFormat?: (format: ScriptFormatMode) => void;
   onOpenNLEPipeline?: () => void;
+  onOpenTeleprompter?: () => void;
   pendingSyncCount?: number;
   onOpenRevisionImpact?: () => void;
+  continuityAlertCount?: number;
+  onOpenContinuityCheck?: () => void;
+  isRevisionPassMode?: boolean;
+  onToggleRevisionPassMode?: () => void;
+  revisionPassCounts?: RevisionPassCounts;
+  isLeftPanelCollapsed?: boolean;
+  isRightPanelCollapsed?: boolean;
+  onToggleLeftPanel?: () => void;
+  onToggleRightPanel?: () => void;
+  onToggleFocusCenter?: () => void;
+  isQuickNotesOpen?: boolean;
+  onToggleQuickNotes?: () => void;
   zoomLevel: number;
   onChangeZoom: (zoom: number) => void;
 }
@@ -50,19 +73,116 @@ export const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
   scriptFormat = 'single_column_film',
   onChangeScriptFormat,
   onOpenNLEPipeline,
+  onOpenTeleprompter,
   pendingSyncCount = 0,
   onOpenRevisionImpact,
+  continuityAlertCount = 0,
+  onOpenContinuityCheck,
+  isRevisionPassMode = false,
+  onToggleRevisionPassMode,
+  revisionPassCounts,
+  isLeftPanelCollapsed = false,
+  isRightPanelCollapsed = false,
+  onToggleLeftPanel,
+  onToggleRightPanel,
+  onToggleFocusCenter,
+  isQuickNotesOpen = false,
+  onToggleQuickNotes,
   zoomLevel,
   onChangeZoom,
 }) => {
+  const isCenterMaximized = isLeftPanelCollapsed && isRightPanelCollapsed;
+
   return (
     <div className="bg-[#2e2e2e] border-b border-[#3e3e3e] flex flex-col text-xs select-none">
-      {/* Document Tab Bar */}
-      <div className="flex items-center px-2 bg-[#222222] border-b border-[#383838] h-7">
-        <div className="flex items-center bg-[#2e2e2e] text-gray-200 px-3 py-1 rounded-t border-t-2 border-[#ff7700] text-xs font-medium space-x-2">
-          <span>{isModified ? `*${documentTitle}` : documentTitle}</span>
+      {/* Document Tab Bar + Panel Collapse Controls */}
+      <div className="flex items-center justify-between px-2 bg-[#222222] border-b border-[#383838] h-7 gap-2">
+        <div className="flex items-center bg-[#2e2e2e] text-gray-200 px-3 py-1 rounded-t border-t-2 border-[#ff7700] text-xs font-medium space-x-2 min-w-0">
+          <span className="truncate">{isModified ? `*${documentTitle}` : documentTitle}</span>
           <span className="text-[10px] text-gray-500 hover:text-white cursor-pointer ml-1">×</span>
         </div>
+
+        {(onToggleLeftPanel || onToggleRightPanel || onToggleFocusCenter) && (
+          <div className="flex items-center gap-1 text-[11px] shrink-0">
+            {onToggleLeftPanel && (
+              <button
+                type="button"
+                onClick={onToggleLeftPanel}
+                title={isLeftPanelCollapsed ? 'Show Left Outline Panel' : 'Hide Left Outline Panel'}
+                className={`flex items-center gap-1 px-2 py-0.5 rounded border transition-colors whitespace-nowrap shrink-0 ${
+                  !isLeftPanelCollapsed
+                    ? 'bg-[#2c2c2c] border-[#454545] text-gray-200'
+                    : 'bg-[#1a1a1a] border-[#333333] text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                <PanelLeft className="w-3 h-3" />
+                <span className="hidden sm:inline">Outline</span>
+              </button>
+            )}
+            {onToggleFocusCenter && (
+              <button
+                type="button"
+                onClick={onToggleFocusCenter}
+                title={
+                  isCenterMaximized
+                    ? 'Restore Left & Right Side Panels'
+                    : 'Collapse Side Panels to Maximize Center Workspace'
+                }
+                className={`flex items-center gap-1 px-2 py-0.5 rounded border transition-colors whitespace-nowrap shrink-0 ${
+                  isCenterMaximized
+                    ? 'bg-[#2f2214] border-[#ff7700] text-amber-300 font-semibold'
+                    : 'bg-[#1a1a1a] border-[#333333] text-gray-300 hover:text-white hover:bg-[#2a2a2a]'
+                }`}
+              >
+                {isCenterMaximized ? (
+                  <>
+                    <Minimize2 className="w-3 h-3" />
+                    <span>Restore Panels</span>
+                  </>
+                ) : (
+                  <>
+                    <Maximize2 className="w-3 h-3" />
+                    <span>Focus Center</span>
+                  </>
+                )}
+              </button>
+            )}
+            {onToggleRightPanel && (
+              <button
+                type="button"
+                onClick={onToggleRightPanel}
+                title={isRightPanelCollapsed ? 'Show Right Inspector Panel' : 'Hide Right Inspector Panel'}
+                className={`flex items-center gap-1 px-2 py-0.5 rounded border transition-colors whitespace-nowrap shrink-0 ${
+                  !isRightPanelCollapsed
+                    ? 'bg-[#2c2c2c] border-[#454545] text-gray-200'
+                    : 'bg-[#1a1a1a] border-[#333333] text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                <PanelRight className="w-3 h-3" />
+                <span className="hidden sm:inline">Inspector</span>
+              </button>
+            )}
+            {activeWorkspace === 'authoring' && onToggleQuickNotes && (
+              <button
+                type="button"
+                onClick={onToggleQuickNotes}
+                title={
+                  isQuickNotesOpen
+                    ? 'Minimize Quick Notes floating scratchpad'
+                    : 'Open Quick Notes floating scratchpad'
+                }
+                className={`flex items-center gap-1 px-2 py-0.5 rounded border transition-colors whitespace-nowrap shrink-0 ${
+                  isQuickNotesOpen
+                    ? 'bg-[#2f2214] border-[#ff7700] text-amber-300 font-semibold'
+                    : 'bg-[#1a1a1a] border-[#333333] text-gray-300 hover:text-white hover:bg-[#2a2a2a]'
+                }`}
+              >
+                <StickyNote className="w-3 h-3 text-[#ff8c1a]" />
+                <span>Quick Notes</span>
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Main Formatting & Action Ribbon */}
@@ -88,6 +208,9 @@ export const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
               </option>
               <option value="DIALOGUE" className="bg-[#222] text-gray-200">
                 Dialogue
+              </option>
+              <option value="VOICE_OVER" className="bg-[#222] text-violet-300">
+                Voice-over (V.O.)
               </option>
               <option value="PARENTHETICAL" className="bg-[#222] text-gray-200">
                 Parenthetical
@@ -218,6 +341,29 @@ export const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
             </button>
           )}
 
+          {onOpenContinuityCheck && (
+            <button
+              onClick={onOpenContinuityCheck}
+              className={`flex items-center space-x-1.5 px-2.5 py-1 rounded border transition-colors whitespace-nowrap shrink-0 ${
+                continuityAlertCount > 0
+                  ? 'bg-[#2c191c] hover:bg-[#392024] text-rose-200 border-rose-500/80'
+                  : 'bg-[#242424] hover:bg-[#353535] text-emerald-400 border-[#444444]'
+              }`}
+              title="Automated Prop & Costume Continuity Check across scenes"
+            >
+              {continuityAlertCount > 0 ? (
+                <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
+              ) : (
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+              )}
+              <span className="font-medium tabular-nums">
+                {continuityAlertCount > 0
+                  ? `Continuity (${continuityAlertCount})`
+                  : 'Continuity Clear'}
+              </span>
+            </button>
+          )}
+
           {onOpenNLEPipeline && (
             <button
               onClick={onOpenNLEPipeline}
@@ -226,6 +372,17 @@ export const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
             >
               <AudioWaveform className="w-3.5 h-3.5" />
               <span>NLE Pipeline</span>
+            </button>
+          )}
+
+          {onOpenTeleprompter && (
+            <button
+              onClick={onOpenTeleprompter}
+              className="flex items-center space-x-1.5 px-2.5 py-1 bg-[#141414] hover:bg-black text-white rounded border border-[#444444] hover:border-[#ff7700] transition-colors whitespace-nowrap shrink-0"
+              title="Launch Dedicated Teleprompter Window (White on Black)"
+            >
+              <MonitorPlay className="w-3.5 h-3.5 text-[#ff7700]" />
+              <span>Teleprompter</span>
             </button>
           )}
 
@@ -276,6 +433,76 @@ export const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Revision Pass Toggle & Color Legend Strip (Authoring Workspace) */}
+      {activeWorkspace === 'authoring' && onToggleRevisionPassMode && (
+        <div className="bg-[#252525] border-t border-[#383838] px-3 py-1 flex flex-wrap items-center justify-between gap-3 text-[11px]">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={onToggleRevisionPassMode}
+              className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded border transition-colors whitespace-nowrap shrink-0 ${
+                isRevisionPassMode
+                  ? 'bg-[#362020] border-red-500/80 text-red-200 font-semibold'
+                  : 'bg-[#1d1d1d] hover:bg-[#2c2c2c] border-[#424242] text-gray-300'
+              }`}
+              title="Color-code screenplay elements by last edited date"
+            >
+              <History className={`w-3.5 h-3.5 ${isRevisionPassMode ? 'text-red-400' : 'text-gray-400'}`} />
+              <span>Revision Pass: {isRevisionPassMode ? 'On' : 'Off'}</span>
+            </button>
+
+            {/* Color-Coded Legend */}
+            <div
+              className={`flex items-center gap-4 transition-opacity ${
+                isRevisionPassMode ? 'opacity-100' : 'opacity-75'
+              }`}
+              aria-label="Revision Pass Color Legend"
+            >
+              <span className="text-gray-400 hidden sm:inline">Legend:</span>
+              <span className="inline-flex items-center gap-1.5 text-gray-200 whitespace-nowrap">
+                <span className="w-2.5 h-2.5 rounded-xs bg-red-500 border border-red-300/60 shrink-0" />
+                <span>
+                  Red — Today
+                  {revisionPassCounts !== undefined && (
+                    <span className="text-red-300 font-mono tabular-nums ml-1">
+                      ({revisionPassCounts.today})
+                    </span>
+                  )}
+                </span>
+              </span>
+              <span className="inline-flex items-center gap-1.5 text-gray-200 whitespace-nowrap">
+                <span className="w-2.5 h-2.5 rounded-xs bg-amber-400 border border-amber-200/60 shrink-0" />
+                <span>
+                  Yellow — This Week
+                  {revisionPassCounts !== undefined && (
+                    <span className="text-amber-300 font-mono tabular-nums ml-1">
+                      ({revisionPassCounts.thisWeek})
+                    </span>
+                  )}
+                </span>
+              </span>
+              <span className="inline-flex items-center gap-1.5 text-gray-300 whitespace-nowrap">
+                <span className="w-2.5 h-2.5 rounded-xs bg-gray-400 border border-gray-300/50 shrink-0" />
+                <span>
+                  Grey — Older
+                  {revisionPassCounts !== undefined && (
+                    <span className="text-gray-400 font-mono tabular-nums ml-1">
+                      ({revisionPassCounts.older})
+                    </span>
+                  )}
+                </span>
+              </span>
+            </div>
+          </div>
+
+          <span className="text-[11px] text-gray-400 hidden md:inline">
+            {isRevisionPassMode
+              ? 'Highlighting live element edits by recency'
+              : 'Toggle Revision Pass to inspect edit recency across scenes'}
+          </span>
+        </div>
+      )}
     </div>
   );
 };

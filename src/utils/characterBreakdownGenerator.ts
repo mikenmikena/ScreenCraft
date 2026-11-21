@@ -37,6 +37,9 @@ export interface GeneratedCharacterBreakdown {
   sceneIds: string[];
   sceneNumbers: number[];
   speakingLines: number;
+  dialogueLines: number;
+  voiceOverLines: number;
+  voiceOverSceneNumbers: number[];
   storyDays: number[];
   traits: BreakdownItem[];
   motivations: BreakdownItem[];
@@ -170,36 +173,55 @@ export function generateCharacterBreakdowns(params: {
     }
   });
 
-  // Group dialogue/parentheticals spoken by each character in element order
+  // Group dialogue, voice-over, and parentheticals spoken by each character in element order
   const spokenDialoguesByChar: Record<
     string,
-    { text: string; sceneId?: string; parenthetical?: string }[]
+    { text: string; sceneId?: string; parenthetical?: string; isVoiceOver: boolean }[]
   > = {};
   let activeSpeaker: string | null = null;
+  let activeSpeakerHasVOCue = false;
   let pendingParen: string | undefined;
 
   elements.forEach((el) => {
     if (el.type === 'SCENE_HEADING') {
       activeSpeaker = null;
+      activeSpeakerHasVOCue = false;
       pendingParen = undefined;
     } else if (el.type === 'CHARACTER') {
       activeSpeaker = normalizeName(el.text);
+      activeSpeakerHasVOCue = /\((V\.?O\.?|VOICE\s*OVER)\)/i.test(el.text);
       pendingParen = undefined;
     } else if (el.type === 'PARENTHETICAL') {
       pendingParen = el.text.trim();
-    } else if (el.type === 'DIALOGUE' && activeSpeaker) {
-      if (!spokenDialoguesByChar[activeSpeaker]) {
-        spokenDialoguesByChar[activeSpeaker] = [];
+    } else if (el.type === 'DIALOGUE' || el.type === 'VOICE_OVER') {
+      const resolvedSpeaker =
+        (el.character ? normalizeName(el.character) : '') ||
+        activeSpeaker ||
+        (el.type === 'VOICE_OVER' ? 'NARRATOR' : '');
+      if (resolvedSpeaker) {
+        if (!spokenDialoguesByChar[resolvedSpeaker]) {
+          spokenDialoguesByChar[resolvedSpeaker] = [];
+        }
+        spokenDialoguesByChar[resolvedSpeaker].push({
+          text: el.text.trim(),
+          sceneId: el.sceneId,
+          parenthetical: pendingParen,
+          isVoiceOver: el.type === 'VOICE_OVER' || activeSpeakerHasVOCue,
+        });
       }
-      spokenDialoguesByChar[activeSpeaker].push({
-        text: el.text.trim(),
-        sceneId: el.sceneId,
-        parenthetical: pendingParen,
-      });
       pendingParen = undefined;
-    } else if (el.type === 'ACTION' || el.type === 'TRANSITION') {
+    } else if (el.type === 'ACTION' || el.type === 'TRANSITION' || el.type === 'SHOT') {
       activeSpeaker = null;
+      activeSpeakerHasVOCue = false;
       pendingParen = undefined;
+    }
+  });
+
+  // Ensure any character introduced exclusively via VOICE_OVER or uncatalogued DIALOGUE is included
+  Object.keys(spokenDialoguesByChar).forEach((speakerName) => {
+    if (speakerName && !seenNames[speakerName]) {
+      seenNames[speakerName] = true;
+      orderedNames.push(speakerName);
     }
   });
 
@@ -216,7 +238,11 @@ export function generateCharacterBreakdowns(params: {
         normalizeName(m.characterName) === charName
     );
 
-    // Combine sceneIds from Character Tag + Scene appearances + Cast profile
+    const spokenBlocks = spokenDialoguesByChar[charName] || [];
+    const voiceOverBlocks = spokenBlocks.filter((b) => b.isVoiceOver);
+    const dialogueBlocks = spokenBlocks.filter((b) => !b.isVoiceOver);
+
+    // Combine sceneIds from Character Tag + Scene appearances + Spoken/V.O. elements + Cast profile
     const sceneIdSet = new Set<string>();
     (charTag?.sceneIds || []).forEach((id) => {
       if (sceneById[id]) sceneIdSet.add(id);
@@ -224,6 +250,11 @@ export function generateCharacterBreakdowns(params: {
     scenes.forEach((sc) => {
       if (sc.characters.some((c) => normalizeName(c) === charName)) {
         sceneIdSet.add(sc.id);
+      }
+    });
+    spokenBlocks.forEach((blk) => {
+      if (blk.sceneId && sceneById[blk.sceneId]) {
+        sceneIdSet.add(blk.sceneId);
       }
     });
     if (sceneIdSet.size === 0 && castMember) {
@@ -243,7 +274,18 @@ export function generateCharacterBreakdowns(params: {
       (a, b) => a - b
     );
 
-    const spokenBlocks = spokenDialoguesByChar[charName] || [];
+    const voiceOverSceneIds = new Set(
+      voiceOverBlocks.map((b) => b.sceneId).filter((id): id is string => Boolean(id && sceneById[id]))
+    );
+    const dialogueSceneIds = new Set(
+      dialogueBlocks.map((b) => b.sceneId).filter((id): id is string => Boolean(id && sceneById[id]))
+    );
+    const voiceOverSceneNumbers = Array.from(voiceOverSceneIds)
+      .map((id) => sceneById[id].sceneNumber)
+      .sort((a, b) => a - b);
+
+    const voiceOverLines = voiceOverBlocks.length;
+    const dialogueLines = Math.max(dialogueBlocks.length, (storyChar?.speakingLines || 0) - voiceOverLines);
     const speakingLines = Math.max(spokenBlocks.length, storyChar?.speakingLines || 0);
 
     // Action lines mentioning this character
@@ -397,6 +439,17 @@ export function generateCharacterBreakdowns(params: {
       }
     }
 
+    if (voiceOverLines > 0) {
+      const voRefIds = Array.from(voiceOverSceneIds);
+      pushTrait(
+        dialogueLines > 0
+          ? `Dual narrative voice — delivers off-camera Voice-over (V.O.) narration or internal monologue alongside on-set dialogue`
+          : `Reflective Voice-over (V.O.) narrator — anchors internal monologue and off-camera perspective without on-set presence`,
+        `Voice-over (V.O.) Elements (${voiceOverLines} line${voiceOverLines === 1 ? '' : 's'})`,
+        voRefIds.length > 0 ? voRefIds : sceneIds
+      );
+    }
+
     if (rawTraits.length === 0) {
       pushTrait(
         charScenes.length > 1
@@ -428,12 +481,22 @@ export function generateCharacterBreakdowns(params: {
       }
     };
 
-    // Extract motivations from character's dialogue intents
+    // Extract motivations from character's dialogue & voice-over intents
     spokenBlocks.forEach((block) => {
       const scNum = block.sceneId ? sceneById[block.sceneId]?.sceneNumber : undefined;
-      const scLabel = scNum ? `Dialogue · Sc. ${scNum}` : 'Script Dialogue';
+      const prefix = block.isVoiceOver ? 'Voice-over (V.O.)' : 'Dialogue';
+      const scLabel = scNum ? `${prefix} · Sc. ${scNum}` : `Script ${prefix}`;
       const scRef = block.sceneId ? [block.sceneId] : [];
       const lower = block.text.toLowerCase();
+
+      if (block.isVoiceOver && rawMotivations.length < 4 && block.text.trim()) {
+        const preview = block.text.trim().length > 90 ? `${block.text.trim().slice(0, 87)}...` : block.text.trim();
+        pushMotivation(
+          `Internal perspective / narration beat: "${preview}"`,
+          scLabel,
+          scRef
+        );
+      }
 
       if (lower.includes('throwing me out') || lower.includes("didn't even strike")) {
         pushMotivation(
@@ -607,7 +670,23 @@ export function generateCharacterBreakdowns(params: {
       }
     });
 
-    // 3e. Default role-grounded base wardrobe requirement if none explicitly tagged yet
+    // 3e. Voice-over / ADR off-camera wardrobe distinction
+    if (voiceOverLines > 0) {
+      const voOnlyScenes = charScenes.filter(
+        (sc) => voiceOverSceneIds.has(sc.id) && !dialogueSceneIds.has(sc.id)
+      );
+      if (voOnlyScenes.length > 0) {
+        pushCostume(
+          `ADR / Voice-over Booth Session (Off-camera V.O. in Sc. ${voOnlyScenes
+            .map((s) => s.sceneNumber)
+            .join(', ')} — no on-set wardrobe required for V.O.-only scenes)`,
+          'Voice-over (V.O.) Production Tag',
+          voOnlyScenes.map((s) => s.id)
+        );
+      }
+    }
+
+    // 3f. Default role-grounded base wardrobe requirement if none explicitly tagged yet
     if (rawCostumes.length === 0) {
       if (/\b(ambassador|councilor|councillor|envoy)\b/i.test(charName)) {
         pushCostume(
@@ -722,7 +801,14 @@ export function generateCharacterBreakdowns(params: {
         text: a.text,
       });
     });
-    spokenBlocks.slice(0, 3).forEach((d) => {
+    voiceOverBlocks.slice(0, 2).forEach((vo) => {
+      keyExcerpts.push({
+        sceneNumber: vo.sceneId ? sceneById[vo.sceneId]?.sceneNumber : undefined,
+        type: 'VOICE_OVER (V.O.)',
+        text: vo.parenthetical ? `${vo.parenthetical} "${vo.text}"` : `"${vo.text}"`,
+      });
+    });
+    dialogueBlocks.slice(0, 3).forEach((d) => {
       keyExcerpts.push({
         sceneNumber: d.sceneId ? sceneById[d.sceneId]?.sceneNumber : undefined,
         type: 'DIALOGUE',
@@ -752,6 +838,9 @@ export function generateCharacterBreakdowns(params: {
       sceneIds,
       sceneNumbers,
       speakingLines,
+      dialogueLines: Math.max(0, dialogueLines),
+      voiceOverLines,
+      voiceOverSceneNumbers,
       storyDays,
       traits,
       motivations,

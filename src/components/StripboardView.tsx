@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { StripboardStrip, Scene } from '../types/story';
+import React, { useMemo, useState } from 'react';
+import { StripboardStrip, Scene, ScreenplayElement, ShootLocation } from '../types/story';
+import { ScheduleOptimizerModal } from './ScheduleOptimizerModal';
 import {
   Calendar,
   ArrowUp,
@@ -15,11 +16,15 @@ import {
   Edit3,
   Check,
   X,
+  Route,
+  RotateCcw,
 } from 'lucide-react';
 
 interface StripboardViewProps {
   strips: StripboardStrip[];
   scenes: Scene[];
+  elements?: ScreenplayElement[];
+  locations?: ShootLocation[];
   selectedSceneId: string | null;
   onSelectScene: (sceneId: string) => void;
   onUpdateStrips: (newStrips: StripboardStrip[]) => void;
@@ -31,11 +36,14 @@ interface StripboardViewProps {
   onOpenRevisionImpact?: () => void;
   onSwitchSubView?: (view: 'stripboard' | 'cast_crew' | 'location_map') => void;
   onOpenCallSheet?: (dayNumber?: number) => void;
+  onNotify?: (message: string) => void;
 }
 
 export const StripboardView: React.FC<StripboardViewProps> = ({
   strips,
-  scenes: _scenes,
+  scenes,
+  elements = [],
+  locations = [],
   selectedSceneId,
   onSelectScene,
   onUpdateStrips,
@@ -47,6 +55,7 @@ export const StripboardView: React.FC<StripboardViewProps> = ({
   onOpenRevisionImpact,
   onSwitchSubView,
   onOpenCallSheet,
+  onNotify,
 }) => {
   const [selectedStripId, setSelectedStripId] = useState<string | null>(null);
   const [editingStripId, setEditingStripId] = useState<string | null>(null);
@@ -55,6 +64,56 @@ export const StripboardView: React.FC<StripboardViewProps> = ({
   const [editDayNight, setEditDayNight] = useState('DAY');
   const [editTimeOfDay, setEditTimeOfDay] = useState('09:00');
   const [editStoryDay, setEditStoryDay] = useState(1);
+  const [isOptimizerOpen, setIsOptimizerOpen] = useState(false);
+  const [preOptimizeSnapshot, setPreOptimizeSnapshot] = useState<StripboardStrip[] | null>(null);
+
+  // Derive live Voice-over (V.O.) characters per sceneId directly from script elements
+  const liveVOBySceneId = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    let activeChar = '';
+    let activeCharIsVO = false;
+    let activeSceneId = '';
+
+    elements.forEach((el) => {
+      if (el.sceneId && el.sceneId !== activeSceneId) {
+        activeSceneId = el.sceneId;
+        activeChar = '';
+        activeCharIsVO = false;
+      }
+      const sid = el.sceneId || activeSceneId;
+      if (!sid) return;
+
+      if (el.type === 'CHARACTER' && el.text.trim()) {
+        activeChar = el.text.replace(/\(.*?\)/g, '').trim().toUpperCase();
+        activeCharIsVO = /\((V\.?O\.?|VOICE\s*OVER)\)/i.test(el.text);
+        if (activeChar && activeCharIsVO) {
+          if (!map.has(sid)) map.set(sid, new Set());
+          map.get(sid)!.add(activeChar);
+        }
+      } else if (el.type === 'VOICE_OVER') {
+        const speaker =
+          (el.character ? el.character.replace(/\(.*?\)/g, '').trim().toUpperCase() : '') ||
+          activeChar ||
+          'NARRATOR';
+        if (speaker) {
+          if (!map.has(sid)) map.set(sid, new Set());
+          map.get(sid)!.add(speaker);
+        }
+      } else if (el.type === 'DIALOGUE' && activeCharIsVO) {
+        const speaker =
+          (el.character ? el.character.replace(/\(.*?\)/g, '').trim().toUpperCase() : '') ||
+          activeChar;
+        if (speaker) {
+          if (!map.has(sid)) map.set(sid, new Set());
+          map.get(sid)!.add(speaker);
+        }
+      } else if (el.type !== 'PARENTHETICAL') {
+        activeChar = '';
+        activeCharIsVO = false;
+      }
+    });
+    return map;
+  }, [elements]);
 
   const moveStrip = (index: number, direction: 'up' | 'down') => {
     if (direction === 'up' && index === 0) return;
@@ -154,6 +213,28 @@ export const StripboardView: React.FC<StripboardViewProps> = ({
         </div>
 
         <div className="flex items-center space-x-2 shrink-0">
+          {preOptimizeSnapshot && (
+            <button
+              onClick={() => {
+                onUpdateStrips(preOptimizeSnapshot);
+                setPreOptimizeSnapshot(null);
+                if (onNotify) onNotify('Reverted Stripboard to pre-optimization order');
+              }}
+              className="flex items-center space-x-1 px-2.5 py-1 bg-[#262626] hover:bg-[#333333] text-amber-300 rounded border border-amber-500/40 transition-colors whitespace-nowrap shrink-0"
+              title="Restore Stripboard order from before last Optimization Wizard run"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Undo Optimization</span>
+            </button>
+          )}
+          <button
+            onClick={() => setIsOptimizerOpen(true)}
+            className="flex items-center space-x-1.5 px-2.5 py-1 bg-[#2d241b] hover:bg-[#3c2f21] text-[#ff9633] rounded border border-[#ff7700]/60 font-medium transition-colors whitespace-nowrap shrink-0"
+            title="Open automated Optimization Wizard to group shared locations & cast and minimize turnaround times"
+          >
+            <Route className="w-3.5 h-3.5" />
+            <span>Optimization Wizard</span>
+          </button>
           {onOpenRevisionImpact && (
             <button
               onClick={onOpenRevisionImpact}
@@ -344,10 +425,43 @@ export const StripboardView: React.FC<StripboardViewProps> = ({
                     {strip.scheduledDuration || '01:00'}
                   </div>
 
-                  <div className="col-span-3 text-[11px] truncate pr-2 font-sans opacity-90">
-                    {strip.characters && strip.characters.length > 0
-                      ? strip.characters.join(' / ')
-                      : 'NO CAST'}
+                  <div className="col-span-3 text-[11px] pr-2 font-sans flex flex-wrap items-center gap-1">
+                    {(() => {
+                      const voSet = new Set<string>(
+                        (strip.voiceOverCharacters || []).map((c) => c.trim().toUpperCase())
+                      );
+                      if (strip.sceneId && liveVOBySceneId.has(strip.sceneId)) {
+                        liveVOBySceneId.get(strip.sceneId)!.forEach((c) => voSet.add(c));
+                      }
+                      const combinedChars = Array.from(
+                        new Set<string>([
+                          ...(strip.characters || []).map((c) => c.trim().toUpperCase()),
+                          ...Array.from(voSet),
+                        ])
+                      ).filter(Boolean);
+
+                      if (combinedChars.length === 0) {
+                        return <span className="opacity-75">NO CAST</span>;
+                      }
+
+                      return combinedChars.map((charName, cIdx) => {
+                        const isVO = voSet.has(charName);
+                        return (
+                          <span key={charName} className="inline-flex items-center gap-1">
+                            {cIdx > 0 && <span className="opacity-60">/</span>}
+                            <span className="truncate max-w-[140px]">{charName}</span>
+                            {isVO && (
+                              <span
+                                title={`${charName} has Voice-over (V.O.) lines in this scene`}
+                                className="px-1 py-0.2 rounded-xs bg-violet-950/90 text-violet-100 border border-violet-400/50 font-mono text-[9px] font-bold leading-tight shrink-0"
+                              >
+                                V.O.
+                              </span>
+                            )}
+                          </span>
+                        );
+                      });
+                    })()}
                   </div>
 
                   <div className="col-span-1 flex items-center justify-end space-x-1 text-right">
@@ -466,6 +580,20 @@ export const StripboardView: React.FC<StripboardViewProps> = ({
           })}
         </div>
       </div>
+
+      <ScheduleOptimizerModal
+        isOpen={isOptimizerOpen}
+        onClose={() => setIsOptimizerOpen(false)}
+        strips={strips}
+        scenes={scenes}
+        elements={elements}
+        locations={locations}
+        onApplySchedule={(optimizedStrips, summaryLabel) => {
+          setPreOptimizeSnapshot(strips);
+          onUpdateStrips(optimizedStrips);
+          if (onNotify) onNotify(summaryLabel);
+        }}
+      />
     </div>
   );
 };

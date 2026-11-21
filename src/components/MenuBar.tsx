@@ -22,9 +22,14 @@ import {
   MapPin,
   AudioWaveform,
   RefreshCw,
-  BookOpen
+  BookOpen,
+  MonitorPlay,
+  ShieldAlert,
+  HelpCircle,
+  Keyboard
 } from 'lucide-react';
 import { ActiveWorkspace, ElementType, StoryProject } from '../types/story';
+import { HelpSectionCategory } from './HelpGuideModal';
 
 interface MenuBarProps {
   activeWorkspace: ActiveWorkspace;
@@ -44,6 +49,10 @@ interface MenuBarProps {
   onOpenLocationMap?: () => void;
   onOpenNLEPipeline?: () => void;
   onOpenRevisionImpact?: () => void;
+  onOpenTeleprompter?: () => void;
+  onOpenContinuityCheck?: () => void;
+  continuityAlertCount?: number;
+  onOpenHelpGuide?: (category?: HelpSectionCategory, toolId?: string) => void;
   currentProject: StoryProject;
   sampleProjects: StoryProject[];
 }
@@ -66,6 +75,10 @@ export const MenuBar: React.FC<MenuBarProps> = ({
   onOpenLocationMap,
   onOpenNLEPipeline,
   onOpenRevisionImpact,
+  onOpenTeleprompter,
+  onOpenContinuityCheck,
+  continuityAlertCount = 0,
+  onOpenHelpGuide,
   currentProject,
   sampleProjects,
 }) => {
@@ -309,6 +322,21 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                 <FileCode className="w-3.5 h-3.5" />
                 <span>Rust Native Architecture & Hub</span>
               </button>
+              {onOpenTeleprompter && (
+                <>
+                  <div className="h-px bg-[#333333] my-1"></div>
+                  <button
+                    onClick={() => {
+                      onOpenTeleprompter();
+                      setOpenMenu(null);
+                    }}
+                    className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs"
+                  >
+                    <MonitorPlay className="w-3.5 h-3.5 text-[#ff7700]" />
+                    <span>Studio Teleprompter Window...</span>
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -417,6 +445,37 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                   <span>Live Schedule Sync & Impact Preview...</span>
                 </button>
               )}
+              {onOpenContinuityCheck && (
+                <button
+                  onClick={() => {
+                    onOpenContinuityCheck();
+                    setOpenMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center justify-between text-xs"
+                >
+                  <span className="flex items-center space-x-2">
+                    <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
+                    <span>Scene Continuity Check...</span>
+                  </span>
+                  {continuityAlertCount > 0 && (
+                    <span className="text-[10px] font-mono text-rose-300 tabular-nums">
+                      ({continuityAlertCount})
+                    </span>
+                  )}
+                </button>
+              )}
+              {onOpenTeleprompter && (
+                <button
+                  onClick={() => {
+                    onOpenTeleprompter();
+                    setOpenMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs"
+                >
+                  <MonitorPlay className="w-3.5 h-3.5 text-[#ff7700]" />
+                  <span>Filming Teleprompter Window...</span>
+                </button>
+              )}
               <button
                 onClick={() => {
                   onSelectWorkspace('storyboard');
@@ -483,6 +542,28 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                 <TagIcon className="w-3.5 h-3.5 text-indigo-400" />
                 <span>Tag Element (Character / Prop / VFX)</span>
               </button>
+              {onOpenContinuityCheck && (
+                <>
+                  <div className="h-px bg-[#333333] my-1"></div>
+                  <button
+                    onClick={() => {
+                      onOpenContinuityCheck();
+                      setOpenMenu(null);
+                    }}
+                    className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center justify-between text-xs"
+                  >
+                    <span className="flex items-center space-x-2">
+                      <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
+                      <span>Scene Continuity Check...</span>
+                    </span>
+                    {continuityAlertCount > 0 && (
+                      <span className="text-[10px] font-mono text-rose-300 tabular-nums">
+                        {continuityAlertCount}
+                      </span>
+                    )}
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -537,6 +618,15 @@ export const MenuBar: React.FC<MenuBarProps> = ({
               </button>
               <button
                 onClick={() => {
+                  onAddElement('VOICE_OVER');
+                  setOpenMenu(null);
+                }}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white text-xs text-violet-300"
+              >
+                Voice-over (V.O.)
+              </button>
+              <button
+                onClick={() => {
                   onAddElement('PARENTHETICAL');
                   setOpenMenu(null);
                 }}
@@ -561,6 +651,91 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                 className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white text-xs"
               >
                 Shot (Camera Setup)
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Help Menu (Next to Insert) */}
+        <div className="relative">
+          <button
+            onClick={() => toggleMenu('help')}
+            className={`px-2.5 py-1 rounded text-gray-300 hover:text-white hover:bg-[#333333] transition-colors ${
+              openMenu === 'help' ? 'bg-[#333333] text-white' : ''
+            }`}
+          >
+            Help
+          </button>
+          {openMenu === 'help' && (
+            <div className="absolute left-0 top-full mt-1 w-68 bg-[#222222] border border-[#444444] rounded shadow-2xl py-1 z-50 text-gray-200">
+              <div className="px-3 py-1 text-[11px] font-semibold text-gray-400 border-b border-[#333333] uppercase tracking-wider">
+                Documentation & Walkthroughs
+              </div>
+              <button
+                onClick={() => {
+                  onOpenHelpGuide?.('all');
+                  setOpenMenu(null);
+                }}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs font-semibold"
+              >
+                <HelpCircle className="w-3.5 h-3.5 text-[#ff8000]" />
+                <span>Interactive Tool Guide...</span>
+              </button>
+
+              <div className="h-px bg-[#333333] my-1"></div>
+
+              <button
+                onClick={() => {
+                  onOpenHelpGuide?.('authoring', 'screenplay-editor');
+                  setOpenMenu(null);
+                }}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs"
+              >
+                <BookOpen className="w-3.5 h-3.5 text-amber-400" />
+                <span>Screenplay Authoring & Voice-over...</span>
+              </button>
+              <button
+                onClick={() => {
+                  onOpenHelpGuide?.('review', 'continuity-check');
+                  setOpenMenu(null);
+                }}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs"
+              >
+                <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
+                <span>Continuity Check & Revision Pass...</span>
+              </button>
+              <button
+                onClick={() => {
+                  onOpenHelpGuide?.('production', 'stripboard-sync');
+                  setOpenMenu(null);
+                }}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs"
+              >
+                <Users className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Stripboard, Cast & Connections...</span>
+              </button>
+              <button
+                onClick={() => {
+                  onOpenHelpGuide?.('export', 'export-live-preview');
+                  setOpenMenu(null);
+                }}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs"
+              >
+                <AudioWaveform className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Export Preview, NLE & Teleprompter...</span>
+              </button>
+
+              <div className="h-px bg-[#333333] my-1"></div>
+
+              <button
+                onClick={() => {
+                  onOpenHelpGuide?.('shortcuts');
+                  setOpenMenu(null);
+                }}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs"
+              >
+                <Keyboard className="w-3.5 h-3.5 text-amber-300" />
+                <span>Keyboard Shortcuts Reference...</span>
               </button>
             </div>
           )}

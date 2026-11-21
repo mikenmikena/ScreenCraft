@@ -1,7 +1,12 @@
 import {
+  CharacterPresenceCrossRefReport,
+  CharacterScheduleSlot,
+  CharacterSimultaneousLocationConflict,
   ElementType,
   NLEBlockMetadata,
   NLEDialogueEntry,
+  NLEExportConfig,
+  NLEExportPreset,
   NLEFrameRate,
   NLEGeneratedSidecarEntry,
   NLEMetadataDocument,
@@ -57,6 +62,9 @@ const estimateElementDurationSec = (el: ScreenplayElement): number => {
     case 'DIALOGUE':
       // ~2.4 words per second conversational pacing
       return Math.max(1.5, Number((words / 2.4).toFixed(2)));
+    case 'VOICE_OVER':
+      // ~2.25 words per second narration / internal monologue pacing
+      return Math.max(1.5, Number((words / 2.25).toFixed(2)));
     case 'CHARACTER':
       return 0.4;
     case 'PARENTHETICAL':
@@ -111,10 +119,109 @@ const xmlEscape = (str: string): string =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;');
 
+export const DEFAULT_NLE_PRESETS: NLEExportPreset[] = [
+  {
+    id: 'preset-premiere-24',
+    name: 'Premiere Pro — Feature 24fps',
+    nleTarget: 'Adobe Premiere Pro',
+    description: 'XMEML v4 timeline with orange scene markers, cyan dialogue cues, and STT audio takes at 00:00:00:00.',
+    isBuiltIn: true,
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    config: {
+      nleTarget: 'Adobe Premiere Pro',
+      frameRate: 24,
+      preferredFormat: 'xml',
+      timecodeStart: '00:00:00:00',
+      includeSceneMarkers: true,
+      includeDialogueCues: true,
+      includeCameraMetadata: true,
+      includePropAndTagMetadata: true,
+      includeAlignedTakes: true,
+      includeTranscriptTokens: true,
+      markerColorProfile: 'premiere',
+      filenameSuffix: '_premiere',
+    },
+  },
+  {
+    id: 'preset-resolve-23976',
+    name: 'DaVinci Resolve — Cinema 23.976fps',
+    nleTarget: 'DaVinci Resolve',
+    description: 'Cinema 23.976 NTSC timeline starting at 01:00:00:00 with camera lens/movement tags and Resolve marker colors.',
+    isBuiltIn: true,
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    config: {
+      nleTarget: 'DaVinci Resolve',
+      frameRate: 23.976,
+      preferredFormat: 'xml',
+      timecodeStart: '01:00:00:00',
+      includeSceneMarkers: true,
+      includeDialogueCues: true,
+      includeCameraMetadata: true,
+      includePropAndTagMetadata: true,
+      includeAlignedTakes: true,
+      includeTranscriptTokens: true,
+      markerColorProfile: 'resolve',
+      filenameSuffix: '_resolve',
+    },
+  },
+  {
+    id: 'preset-avid-24',
+    name: 'Avid Media Composer — 24fps Sidecar',
+    nleTarget: 'Avid Media Composer',
+    description: '01:00:00:00 hour-1 broadcast timecode JSON sidecar & locator XML optimized for Avid Media Composer bins.',
+    isBuiltIn: true,
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    config: {
+      nleTarget: 'Avid Media Composer',
+      frameRate: 24,
+      preferredFormat: 'json',
+      timecodeStart: '01:00:00:00',
+      includeSceneMarkers: true,
+      includeDialogueCues: true,
+      includeCameraMetadata: true,
+      includePropAndTagMetadata: true,
+      includeAlignedTakes: true,
+      includeTranscriptTokens: false,
+      markerColorProfile: 'avid',
+      filenameSuffix: '_avid',
+    },
+  },
+  {
+    id: 'preset-premiere-2997',
+    name: 'Premiere Pro — Broadcast 29.97 DF',
+    nleTarget: 'Adobe Premiere Pro',
+    description: 'Drop-frame 29.97fps broadcast/episodic XML & sidecar configuration.',
+    isBuiltIn: true,
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    config: {
+      nleTarget: 'Adobe Premiere Pro',
+      frameRate: 29.97,
+      preferredFormat: 'xml',
+      timecodeStart: '00:00:00:00',
+      includeSceneMarkers: true,
+      includeDialogueCues: true,
+      includeCameraMetadata: true,
+      includePropAndTagMetadata: true,
+      includeAlignedTakes: true,
+      includeTranscriptTokens: true,
+      markerColorProfile: 'premiere',
+      filenameSuffix: '_premiere_df',
+    },
+  },
+];
+
 export const buildNLEMetadataDocument = (
   project: StoryProject,
-  frameRate: NLEFrameRate = 24
+  frameRate: NLEFrameRate = 24,
+  config?: Partial<NLEExportConfig>,
+  presetName?: string
 ): NLEMetadataDocument => {
+  const timecodeStart: '00:00:00:00' | '01:00:00:00' = config?.timecodeStart || '00:00:00:00';
+  const tcOffsetSec = timecodeStart === '01:00:00:00' ? 3600 : 0;
+  const includeCameraMetadata = config?.includeCameraMetadata ?? true;
+  const includePropAndTagMetadata = config?.includePropAndTagMetadata ?? true;
+  const includeTranscriptTokens = config?.includeTranscriptTokens ?? true;
+
   const sceneMap = new Map<string, Scene>();
   project.scenes.forEach((sc) => sceneMap.set(sc.id, sc));
 
@@ -147,7 +254,7 @@ export const buildNLEMetadataDocument = (
     cursorSec = endSec;
 
     const existingBound = sceneBounds.get(sceneId);
-    const camDir = parseCameraDirection(el, project);
+    const camDir = includeCameraMetadata ? parseCameraDirection(el, project) : undefined;
     const camLabel = camDir
       ? [camDir.shotNumber ? `#${camDir.shotNumber}` : '', camDir.shotType, camDir.cameraMovement]
           .filter(Boolean)
@@ -170,14 +277,21 @@ export const buildNLEMetadataDocument = (
       currentParenthetical = undefined;
     } else if (el.type === 'PARENTHETICAL') {
       currentParenthetical = el.text.trim();
-    } else if (el.type !== 'DIALOGUE') {
+    } else if (el.type !== 'DIALOGUE' && el.type !== 'VOICE_OVER') {
       currentSpeaker = '';
       currentParenthetical = undefined;
     }
 
-    const sceneTagNames = project.tags
-      .filter((t) => t.sceneIds.includes(sceneId))
-      .map((t) => `${t.category}:${t.name}`);
+    const sceneTagNames = includePropAndTagMetadata
+      ? project.tags
+          .filter((t) => t.sceneIds.includes(sceneId))
+          .map((t) => `${t.category}:${t.name}`)
+      : [];
+
+    const resolvedBlockSpeaker =
+      el.type === 'DIALOGUE' || el.type === 'VOICE_OVER' || el.type === 'CHARACTER'
+        ? currentSpeaker || el.character
+        : undefined;
 
     blocks.push({
       blockId: el.id,
@@ -186,19 +300,19 @@ export const buildNLEMetadataDocument = (
       sceneNumber,
       slugline,
       type: el.type,
-      speaker: el.type === 'DIALOGUE' || el.type === 'CHARACTER' ? currentSpeaker || el.character : undefined,
+      speaker: resolvedBlockSpeaker,
       text: el.text,
       normalizedText: normalizeText(el.text),
       cameraDirection: camDir,
-      timecodeIn: secondsToSMPTE(startSec, frameRate),
-      timecodeOut: secondsToSMPTE(endSec, frameRate),
+      timecodeIn: secondsToSMPTE(startSec + tcOffsetSec, frameRate),
+      timecodeOut: secondsToSMPTE(endSec + tcOffsetSec, frameRate),
       startFrame: Math.round(startSec * nominalFps),
       endFrame: Math.round(endSec * nominalFps),
       durationSec: dur,
       tags: sceneTagNames.slice(0, 8),
     });
 
-    if (el.type === 'DIALOGUE' && el.text.trim()) {
+    if ((el.type === 'DIALOGUE' || el.type === 'VOICE_OVER') && el.text.trim()) {
       const nextLineNum = (sceneLineCounter.get(sceneId) || 0) + 1;
       sceneLineCounter.set(sceneId, nextLineNum);
       const speaker = (currentSpeaker || el.character || 'UNKNOWN').toUpperCase();
@@ -216,13 +330,14 @@ export const buildNLEMetadataDocument = (
         parenthetical: currentParenthetical,
         exactText: el.text.trim(),
         normalizedText: normalizeText(el.text),
-        tokens: tokenize(el.text),
+        tokens: includeTranscriptTokens ? tokenize(el.text) : [],
         wordCount: el.text.trim().split(/\s+/).filter(Boolean).length,
-        timecodeIn: secondsToSMPTE(startSec, frameRate),
-        timecodeOut: secondsToSMPTE(endSec, frameRate),
+        timecodeIn: secondsToSMPTE(startSec + tcOffsetSec, frameRate),
+        timecodeOut: secondsToSMPTE(endSec + tcOffsetSec, frameRate),
         startSec,
         endSec,
         estimatedDurationSec: dur,
+        isVoiceOver: el.type === 'VOICE_OVER',
       };
 
       dialogueEntries.push(entry);
@@ -235,9 +350,11 @@ export const buildNLEMetadataDocument = (
 
   const scenesSummary = project.scenes.map((sc) => {
     const bounds = sceneBounds.get(sc.id) || { startSec: 0, endSec: sc.durationSec || 30, cameraDirs: [] };
-    const props = project.tags
-      .filter((t) => t.category === 'prop' && t.sceneIds.includes(sc.id))
-      .map((t) => t.name);
+    const props = includePropAndTagMetadata
+      ? project.tags
+          .filter((t) => t.category === 'prop' && t.sceneIds.includes(sc.id))
+          .map((t) => t.name)
+      : [];
     return {
       sceneId: sc.id,
       sceneNumber: sc.sceneNumber,
@@ -245,24 +362,26 @@ export const buildNLEMetadataDocument = (
       intExt: sc.intExt,
       dayNight: sc.dayNight,
       setting: sc.setting,
-      timecodeIn: secondsToSMPTE(bounds.startSec, frameRate),
-      timecodeOut: secondsToSMPTE(bounds.endSec, frameRate),
+      timecodeIn: secondsToSMPTE(bounds.startSec + tcOffsetSec, frameRate),
+      timecodeOut: secondsToSMPTE(bounds.endSec + tcOffsetSec, frameRate),
       durationSec: Number((bounds.endSec - bounds.startSec).toFixed(2)),
       cast: sc.characters,
       props,
-      cameraDirections: bounds.cameraDirs,
+      cameraDirections: includeCameraMetadata ? bounds.cameraDirs : [],
     };
   });
 
   return {
     schemaVersion: 'story-nle-metadata/v1.0',
     exportedAt: new Date().toISOString(),
-    nleTarget: 'Canonical NLE Sidecar JSON',
+    nleTarget: config?.nleTarget || 'Canonical NLE Sidecar JSON',
+    presetName,
     projectId: project.id,
     projectTitle: project.title,
     draftName: project.activeDraftName || 'Production Draft',
     frameRate,
     dropFrame: frameRate === 29.97,
+    timecodeStart,
     totalDurationSec: Number(cursorSec.toFixed(2)),
     scenes: scenesSummary,
     blocks,
@@ -275,72 +394,104 @@ export const buildNLEMetadataDocument = (
   };
 };
 
+const MARKER_PALETTES = {
+  premiere: {
+    scene: { r: 255, g: 128, b: 0 },
+    dialogue: { r: 6, g: 182, b: 212 },
+  },
+  resolve: {
+    scene: { r: 59, g: 130, b: 246 },
+    dialogue: { r: 16, g: 185, b: 129 },
+  },
+  avid: {
+    scene: { r: 234, g: 179, b: 8 },
+    dialogue: { r: 168, g: 85, b: 247 },
+  },
+};
+
 export const exportPremiereProXML = (
   project: StoryProject,
   frameRate: NLEFrameRate = 24,
-  alignedMatches: TranscriptAlignmentMatch[] = []
+  alignedMatches: TranscriptAlignmentMatch[] = [],
+  config?: Partial<NLEExportConfig>
 ): string => {
-  const doc = buildNLEMetadataDocument(project, frameRate);
+  const doc = buildNLEMetadataDocument(project, frameRate, config);
   const timebase = Math.round(frameRate) || 24;
   const ntsc = frameRate === 23.976 || frameRate === 29.97 ? 'TRUE' : 'FALSE';
   const totalFrames = Math.max(timebase * 10, Math.round(doc.totalDurationSec * timebase));
+  const timecodeStart = config?.timecodeStart || '00:00:00:00';
+  const tcOffsetFrames = timecodeStart === '01:00:00:00' ? 3600 * timebase : 0;
 
-  const sceneMarkersXml = doc.scenes
-    .map((sc) => {
-      const startFrame = Math.round(smpteToSeconds(sc.timecodeIn, frameRate) * timebase);
-      const endFrame = Math.max(
-        startFrame + timebase,
-        Math.round(smpteToSeconds(sc.timecodeOut, frameRate) * timebase)
-      );
-      const comment = [
-        `Scene ${sc.sceneNumber}`,
-        `Cast: ${sc.cast.join(', ') || 'None'}`,
-        sc.props.length > 0 ? `Props: ${sc.props.join(', ')}` : '',
-        sc.cameraDirections.length > 0 ? `Cam: ${sc.cameraDirections.join(' | ')}` : '',
-      ]
-        .filter(Boolean)
-        .join(' | ');
-      return `      <marker>
+  const includeSceneMarkers = config?.includeSceneMarkers ?? true;
+  const includeDialogueCues = config?.includeDialogueCues ?? true;
+  const includeAlignedTakes = config?.includeAlignedTakes ?? true;
+  const palette = MARKER_PALETTES[config?.markerColorProfile || 'premiere'];
+
+  const sceneMarkersXml = includeSceneMarkers
+    ? doc.scenes
+        .map((sc) => {
+          const startFrame = Math.max(
+            0,
+            Math.round(smpteToSeconds(sc.timecodeIn, frameRate) * timebase) - tcOffsetFrames
+          );
+          const endFrame = Math.max(
+            startFrame + timebase,
+            Math.round(smpteToSeconds(sc.timecodeOut, frameRate) * timebase) - tcOffsetFrames
+          );
+          const comment = [
+            `Scene ${sc.sceneNumber}`,
+            `Cast: ${sc.cast.join(', ') || 'None'}`,
+            sc.props.length > 0 ? `Props: ${sc.props.join(', ')}` : '',
+            sc.cameraDirections.length > 0 ? `Cam: ${sc.cameraDirections.join(' | ')}` : '',
+          ]
+            .filter(Boolean)
+            .join(' | ');
+          return `      <marker>
         <comment>${xmlEscape(comment)}</comment>
         <name>${xmlEscape(`SC ${sc.sceneNumber}: ${sc.slugline}`)}</name>
         <in>${startFrame}</in>
         <out>${endFrame}</out>
         <color>
           <alpha>0</alpha>
-          <red>255</red>
-          <green>128</green>
-          <blue>0</blue>
+          <red>${palette.scene.r}</red>
+          <green>${palette.scene.g}</green>
+          <blue>${palette.scene.b}</blue>
         </color>
       </marker>`;
-    })
-    .join('\n');
+        })
+        .join('\n')
+    : '';
 
-  const dialogueMarkersXml = doc.dialogueIndex.entries
-    .map((entry) => {
-      const startFrame = Math.round(entry.startSec * timebase);
-      const endFrame = Math.max(startFrame + 12, Math.round(entry.endSec * timebase));
-      return `      <marker>
-        <comment>${xmlEscape(`[${entry.lineKey}] ${entry.exactText}`)}</comment>
-        <name>${xmlEscape(`${entry.speaker} (${entry.lineKey})`)}</name>
+  const dialogueMarkersXml = includeDialogueCues
+    ? doc.dialogueIndex.entries
+        .map((entry) => {
+          const startFrame = Math.round(entry.startSec * timebase);
+          const endFrame = Math.max(startFrame + 12, Math.round(entry.endSec * timebase));
+          const voPrefix = entry.isVoiceOver ? '[V.O.] ' : '';
+          return `      <marker>
+        <comment>${xmlEscape(`${voPrefix}[${entry.lineKey}] ${entry.exactText}`)}</comment>
+        <name>${xmlEscape(`${entry.speaker}${entry.isVoiceOver ? ' [V.O.]' : ''} (${entry.lineKey})`)}</name>
         <in>${startFrame}</in>
         <out>${endFrame}</out>
         <color>
           <alpha>0</alpha>
-          <red>6</red>
-          <green>182</green>
-          <blue>212</blue>
+          <red>${palette.dialogue.r}</red>
+          <green>${palette.dialogue.g}</green>
+          <blue>${palette.dialogue.b}</blue>
         </color>
       </marker>`;
-    })
-    .join('\n');
+        })
+        .join('\n')
+    : '';
 
-  const alignedClipsXml = alignedMatches
-    .filter((m) => m.matchedEntry !== null)
-    .map((m, i) => {
-      const entry = m.matchedEntry!;
-      const startFrame = Math.round(entry.startSec * timebase);
-      const endFrame = Math.max(startFrame + timebase, Math.round(entry.endSec * timebase));
-      return `          <clipitem id="aligned-take-${i + 1}">
+  const alignedClipsXml = includeAlignedTakes
+    ? alignedMatches
+        .filter((m) => m.matchedEntry !== null)
+        .map((m, i) => {
+          const entry = m.matchedEntry!;
+          const startFrame = Math.round(entry.startSec * timebase);
+          const endFrame = Math.max(startFrame + timebase, Math.round(entry.endSec * timebase));
+          return `          <clipitem id="aligned-take-${i + 1}">
             <name>${xmlEscape(`${m.takeLabel} -> ${entry.lineKey} (${m.confidence}%)`)}</name>
             <duration>${endFrame - startFrame}</duration>
             <rate>
@@ -358,14 +509,15 @@ export const exportPremiereProXML = (
               <lognote>${xmlEscape(`STT Match ${m.confidence}% | Clip TC ${m.transcriptTimecodeIn}`)}</lognote>
             </logginginfo>
           </clipitem>`;
-    })
-    .join('\n');
+        })
+        .join('\n')
+    : '';
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE xmeml>
 <xmeml version="4">
   <sequence id="seq-${xmlEscape(project.id)}">
-    <name>${xmlEscape(`${project.title} - Script Metadata Sequence`)}</name>
+    <name>${xmlEscape(`${project.title} - ${config?.nleTarget || 'Premiere Pro'} Metadata Sequence`)}</name>
     <duration>${totalFrames}</duration>
     <rate>
       <timebase>${timebase}</timebase>
@@ -376,8 +528,8 @@ export const exportPremiereProXML = (
         <timebase>${timebase}</timebase>
         <ntsc>${ntsc}</ntsc>
       </rate>
-      <string>00:00:00:00</string>
-      <frame>0</frame>
+      <string>${timecodeStart}</string>
+      <frame>${tcOffsetFrames}</frame>
       <displayformat>${frameRate === 29.97 ? 'DF' : 'NDF'}</displayformat>
     </timecode>
     <media>
@@ -977,8 +1129,9 @@ export const runNLEPreFlightCheck = (project: StoryProject): NLEPreFlightReport 
       return;
     }
 
-    if (el.type === 'DIALOGUE') {
+    if (el.type === 'DIALOGUE' || el.type === 'VOICE_OVER') {
       pendingCharacterEl = null;
+      const isVO = el.type === 'VOICE_OVER';
       const resolvedSpeaker =
         (activeSpeakerSceneId === el.sceneId ? activeSpeaker : '') ||
         cleanCharacterCue(el.character || '');
@@ -988,11 +1141,11 @@ export const runNLEPreFlightCheck = (project: StoryProject): NLEPreFlightReport 
           id: `pf-orphan-dlg-scene-${el.id}`,
           severity: 'error',
           category: 'orphaned_dialogue',
-          title: `Dialogue detached from valid scene (${el.id})`,
+          title: `${isVO ? 'Voice-over (V.O.)' : 'Dialogue'} detached from valid scene (${el.id})`,
           detail: `"${el.text.trim().slice(0, 52)}" references missing sceneId "${el.sceneId || 'none'}".`,
           sceneId: el.sceneId,
           elementId: el.id,
-          suggestion: 'Assign this dialogue block under a valid SCENE_HEADING.',
+          suggestion: `Assign this ${isVO ? 'voice-over' : 'dialogue'} block under a valid SCENE_HEADING.`,
         });
       }
 
@@ -1001,12 +1154,14 @@ export const runNLEPreFlightCheck = (project: StoryProject): NLEPreFlightReport 
           id: `pf-orphan-dlg-speaker-${el.id}`,
           severity: 'error',
           category: 'orphaned_dialogue',
-          title: `Orphaned dialogue with no speaker (block #${idx + 1})`,
+          title: `Orphaned ${isVO ? 'voice-over (V.O.)' : 'dialogue'} with no speaker (block #${idx + 1})`,
           detail: `"${el.text.trim().slice(0, 56)}" has no preceding CHARACTER cue and no speaker attribution.`,
           sceneId: el.sceneId,
           sceneNumber: sc?.sceneNumber,
           elementId: el.id,
-          suggestion: 'Insert a CHARACTER element directly above this dialogue line.',
+          suggestion: isVO
+            ? 'Insert a CHARACTER (V.O.) cue above or assign a V.O. speaker on this block.'
+            : 'Insert a CHARACTER element directly above this dialogue line.',
         });
       } else if (el.sceneId && sceneMap.has(el.sceneId)) {
         if (!speakingScenesByChar.has(resolvedSpeaker)) {
@@ -1020,12 +1175,12 @@ export const runNLEPreFlightCheck = (project: StoryProject): NLEPreFlightReport 
           id: `pf-empty-dlg-${el.id}`,
           severity: 'warning',
           category: 'orphaned_dialogue',
-          title: `Empty dialogue block for ${resolvedSpeaker || 'UNKNOWN'}`,
+          title: `Empty ${isVO ? 'voice-over (V.O.)' : 'dialogue'} block for ${resolvedSpeaker || 'UNKNOWN'}`,
           detail: `Element ${el.id} has no spoken text and will be omitted from the Dialogue Query index.`,
           sceneId: el.sceneId,
           sceneNumber: sc?.sceneNumber,
           elementId: el.id,
-          suggestion: 'Add dialogue text or remove the empty dialogue block.',
+          suggestion: `Add ${isVO ? 'voice-over' : 'dialogue'} text or remove the empty block.`,
         });
       }
       return;
@@ -1233,5 +1388,256 @@ export const createGeneratedSidecarEntry = async (params: {
     preFlightWarningsCount: params.preFlightWarningsCount,
     draftName: params.project.activeDraftName || 'Production Draft',
     scriptSnapshotHash: computeScriptFingerprint(params.project),
+  };
+};
+
+const parseClockMinutes = (raw?: string): number | null => {
+  if (!raw) return null;
+  const trimmed = raw.trim().toUpperCase();
+  const match = trimmed.match(/^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/);
+  if (!match) return null;
+  let hours = Number(match[1]);
+  const mins = Number(match[2]);
+  const meridiem = match[3];
+  if (Number.isNaN(hours) || Number.isNaN(mins)) return null;
+  if (meridiem === 'PM' && hours < 12) hours += 12;
+  if (meridiem === 'AM' && hours === 12) hours = 0;
+  return hours * 60 + mins;
+};
+
+const parseDurationMinutes = (raw?: string): number => {
+  if (!raw) return 90;
+  const match = raw.trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return 90;
+  const hrs = Number(match[1]);
+  const mins = Number(match[2]);
+  if (Number.isNaN(hrs) || Number.isNaN(mins)) return 90;
+  return Math.max(15, hrs * 60 + mins);
+};
+
+const formatMinutesAsClock = (totalMins: number): string => {
+  const norm = ((totalMins % 1440) + 1440) % 1440;
+  const h = Math.floor(norm / 60);
+  const m = norm % 60;
+  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+};
+
+const normalizeLocationKey = (loc: string): string =>
+  loc
+    .toUpperCase()
+    .replace(/[^A-Z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+export const analyzeCharacterPresenceAndScheduleConflicts = (
+  project: StoryProject
+): CharacterPresenceCrossRefReport => {
+  const characterColors: Record<string, string> = {};
+  const fallbackPalette = ['#ff8000', '#06b6d4', '#10b981', '#a855f7', '#eab308', '#ec4899'];
+  project.characters.forEach((c) => {
+    characterColors[c.name.trim().toUpperCase()] = c.color;
+  });
+  project.tags
+    .filter((t) => t.category === 'character')
+    .forEach((t, idx) => {
+      const key = t.name.trim().toUpperCase();
+      if (!characterColors[key]) {
+        characterColors[key] = t.color || fallbackPalette[idx % fallbackPalette.length];
+      }
+    });
+
+  const canonicalChars = new Set<string>(Object.keys(characterColors));
+  const resolveCanonicalCharacter = (raw: string): string => {
+    const cleaned = cleanCharacterCue(raw);
+    if (!cleaned) return '';
+    if (canonicalChars.has(cleaned)) return cleaned;
+    const matches = Array.from(canonicalChars).filter((canon) => {
+      const tokens = canon.split(/\s+/);
+      return tokens.includes(cleaned) || canon.endsWith(` ${cleaned}`) || canon.startsWith(`${cleaned} `);
+    });
+    return matches.length === 1 ? matches[0] : cleaned;
+  };
+
+  const sceneMap = new Map<string, Scene>();
+  project.scenes.forEach((sc) => sceneMap.set(sc.id, sc));
+
+  // Derive live characters per scene (scenes + stripboard + script elements + character tags)
+  const charsBySceneId = new Map<string, Set<string>>();
+  project.scenes.forEach((sc) => {
+    const s = new Set<string>(sc.characters.map((c) => resolveCanonicalCharacter(c)).filter(Boolean));
+    charsBySceneId.set(sc.id, s);
+  });
+  project.elements.forEach((el) => {
+    if (!el.sceneId) return;
+    if (!charsBySceneId.has(el.sceneId)) charsBySceneId.set(el.sceneId, new Set());
+    if (el.type === 'CHARACTER' && el.text.trim()) {
+      const cleaned = resolveCanonicalCharacter(el.text);
+      if (cleaned) charsBySceneId.get(el.sceneId)!.add(cleaned);
+    } else if ((el.type === 'DIALOGUE' || el.type === 'VOICE_OVER') && el.character?.trim()) {
+      const cleaned = resolveCanonicalCharacter(el.character);
+      if (cleaned) charsBySceneId.get(el.sceneId)!.add(cleaned);
+    }
+  });
+  project.tags
+    .filter((t) => t.category === 'character')
+    .forEach((t) => {
+      const cleaned = resolveCanonicalCharacter(t.name);
+      if (!cleaned) return;
+      t.sceneIds.forEach((sid) => {
+        if (!charsBySceneId.has(sid)) charsBySceneId.set(sid, new Set());
+        charsBySceneId.get(sid)!.add(cleaned);
+      });
+    });
+
+  // Partition stripboard strips into shooting days
+  const sceneSlotsBySceneId: Record<string, CharacterScheduleSlot> = {};
+  const appearancesByDayAndChar = new Map<string, CharacterScheduleSlot[]>();
+
+  let currentDayIndex = 1;
+  let currentDayLabel = 'Day 1';
+  let sawAnySceneInCurrentDay = false;
+
+  project.strips.forEach((strip) => {
+    if (strip.type === 'day_break') {
+      if (sawAnySceneInCurrentDay) {
+        currentDayIndex += 1;
+      }
+      currentDayLabel = strip.bannerDate
+        ? `Day ${currentDayIndex} (${strip.bannerDate})`
+        : strip.bannerTitle || `Day ${currentDayIndex}`;
+      sawAnySceneInCurrentDay = false;
+      return;
+    }
+
+    if (strip.type !== 'scene' || !strip.sceneId) return;
+    sawAnySceneInCurrentDay = true;
+
+    const sc = sceneMap.get(strip.sceneId);
+    const location = (sc?.location || strip.set || sc?.setting || 'UNKNOWN LOCATION').trim();
+    const rawTime = strip.timeOfDay || sc?.timeOfDay || '';
+    const startMin = parseClockMinutes(rawTime);
+    const durMin = parseDurationMinutes(strip.scheduledDuration || sc?.shootingDuration);
+    const endMin = startMin !== null ? startMin + durMin : null;
+    const timeWindowLabel =
+      startMin !== null && endMin !== null
+        ? `${formatMinutesAsClock(startMin)}–${formatMinutesAsClock(endMin)}`
+        : rawTime || (sc?.dayNight ? `${sc.dayNight} call` : 'Same Shooting Day');
+
+    const slot: CharacterScheduleSlot = {
+      sceneId: strip.sceneId,
+      sceneNumber: strip.sceneNumber ?? sc?.sceneNumber ?? 0,
+      sceneHeading: sc?.heading || strip.set || 'UNKNOWN SCENE',
+      location,
+      shootDayIndex: currentDayIndex,
+      shootDayLabel: currentDayLabel,
+      timeOfDay: rawTime,
+      startMin,
+      endMin,
+      timeWindowLabel,
+    };
+
+    sceneSlotsBySceneId[strip.sceneId] = slot;
+
+    const sceneChars = new Set<string>(charsBySceneId.get(strip.sceneId) || []);
+    (strip.characters || []).forEach((c) => {
+      const cleaned = resolveCanonicalCharacter(c);
+      if (cleaned) sceneChars.add(cleaned);
+    });
+
+    sceneChars.forEach((charName) => {
+      if (!characterColors[charName]) {
+        const idx = Object.keys(characterColors).length;
+        characterColors[charName] = fallbackPalette[idx % fallbackPalette.length];
+      }
+      const bucketKey = `${currentDayIndex}::${charName}`;
+      if (!appearancesByDayAndChar.has(bucketKey)) {
+        appearancesByDayAndChar.set(bucketKey, []);
+      }
+      appearancesByDayAndChar.get(bucketKey)!.push(slot);
+    });
+  });
+
+  // Evaluate simultaneous two-location conflicts within the same shooting day
+  const conflicts: CharacterSimultaneousLocationConflict[] = [];
+  const conflictsBySceneId: Record<string, CharacterSimultaneousLocationConflict[]> = {};
+  const conflictsByCharacter: Record<string, CharacterSimultaneousLocationConflict[]> = {};
+
+  appearancesByDayAndChar.forEach((slots, bucketKey) => {
+    if (slots.length < 2) return;
+    const charName = bucketKey.split('::')[1];
+    const color = characterColors[charName] || '#f43f5e';
+
+    for (let i = 0; i < slots.length; i++) {
+      for (let j = i + 1; j < slots.length; j++) {
+        const a = slots[i];
+        const b = slots[j];
+        if (a.sceneId === b.sceneId) continue;
+
+        const locA = normalizeLocationKey(a.location);
+        const locB = normalizeLocationKey(b.location);
+        if (!locA || !locB || locA === locB) continue;
+
+        let isSimultaneous = false;
+        let overlapReason = '';
+
+        if (a.startMin !== null && a.endMin !== null && b.startMin !== null && b.endMin !== null) {
+          if (a.startMin < b.endMin && b.startMin < a.endMin) {
+            isSimultaneous = true;
+            const overlapStart = Math.max(a.startMin, b.startMin);
+            const overlapEnd = Math.min(a.endMin, b.endMin);
+            overlapReason = `Overlapping shoot window (${formatMinutesAsClock(
+              overlapStart
+            )}–${formatMinutesAsClock(overlapEnd)}) across "${a.location}" (Sc. ${
+              a.sceneNumber
+            }) and "${b.location}" (Sc. ${b.sceneNumber}) on ${a.shootDayLabel}.`;
+          }
+        } else if (a.timeOfDay && b.timeOfDay && a.timeOfDay.trim() === b.timeOfDay.trim()) {
+          isSimultaneous = true;
+          overlapReason = `Identical call time (${a.timeOfDay}) at "${a.location}" (Sc. ${a.sceneNumber}) and "${b.location}" (Sc. ${b.sceneNumber}) on ${a.shootDayLabel}.`;
+        } else {
+          // If explicit times aren't staggered, check if shooting dates overlap or remain unseparated
+          const scA = sceneMap.get(a.sceneId);
+          const scB = sceneMap.get(b.sceneId);
+          if (
+            scA?.shootingStartDate &&
+            scB?.shootingStartDate &&
+            scA.shootingStartDate === scB.shootingStartDate
+          ) {
+            isSimultaneous = true;
+            overlapReason = `Same shooting date (${scA.shootingStartDate}) at "${a.location}" (Sc. ${a.sceneNumber}) and "${b.location}" (Sc. ${b.sceneNumber}) with no staggered call time.`;
+          }
+        }
+
+        if (isSimultaneous) {
+          const conflict: CharacterSimultaneousLocationConflict = {
+            id: `char-loc-conflict-${a.shootDayIndex}-${charName}-${a.sceneNumber}-${b.sceneNumber}`,
+            characterName: charName,
+            color,
+            shootDayIndex: a.shootDayIndex,
+            shootDayLabel: a.shootDayLabel,
+            slotA: a,
+            slotB: b,
+            reason: overlapReason,
+          };
+          conflicts.push(conflict);
+
+          if (!conflictsBySceneId[a.sceneId]) conflictsBySceneId[a.sceneId] = [];
+          conflictsBySceneId[a.sceneId].push(conflict);
+          if (!conflictsBySceneId[b.sceneId]) conflictsBySceneId[b.sceneId] = [];
+          conflictsBySceneId[b.sceneId].push(conflict);
+
+          if (!conflictsByCharacter[charName]) conflictsByCharacter[charName] = [];
+          conflictsByCharacter[charName].push(conflict);
+        }
+      }
+    }
+  });
+
+  return {
+    conflicts,
+    conflictsBySceneId,
+    conflictsByCharacter,
+    sceneSlotsBySceneId,
+    characterColors,
   };
 };

@@ -63,25 +63,54 @@ export const deriveLiveSceneSnapshot = (
   const effectiveHeading = headingEl?.text.trim() || scene.heading;
   const headingParts = extractHeadingParts(effectiveHeading, scene);
 
-  // Combine declared scene.characters + CHARACTER elements + character tags for this scene
+  // Combine declared scene.characters + CHARACTER / VOICE_OVER elements + character tags for this scene
   const charSet = new Set<string>(scene.characters.map((c) => c.trim().toUpperCase()).filter(Boolean));
+  const voCharSet = new Set<string>();
+  let activeChar = '';
+  let activeCharIsVO = false;
+
   sceneElements.forEach((el) => {
     if (el.type === 'CHARACTER' && el.text.trim()) {
       const cleaned = el.text.replace(/\(.*?\)/g, '').trim().toUpperCase();
-      if (cleaned) charSet.add(cleaned);
+      activeChar = cleaned;
+      activeCharIsVO = /\((V\.?O\.?|VOICE\s*OVER)\)/i.test(el.text);
+      if (cleaned) {
+        charSet.add(cleaned);
+        if (activeCharIsVO) voCharSet.add(cleaned);
+      }
+    } else if (el.type === 'VOICE_OVER') {
+      const speaker =
+        (el.character ? el.character.replace(/\(.*?\)/g, '').trim().toUpperCase() : '') ||
+        activeChar ||
+        'NARRATOR';
+      if (speaker) {
+        charSet.add(speaker);
+        voCharSet.add(speaker);
+      }
+    } else if (el.type === 'DIALOGUE') {
+      const speaker =
+        (el.character ? el.character.replace(/\(.*?\)/g, '').trim().toUpperCase() : '') ||
+        activeChar;
+      if (speaker) {
+        charSet.add(speaker);
+        if (activeCharIsVO) voCharSet.add(speaker);
+      }
+    } else if (el.type !== 'PARENTHETICAL') {
+      activeChar = '';
+      activeCharIsVO = false;
     }
   });
   tags
     .filter((t) => t.category === 'character' && t.sceneIds.includes(scene.id))
     .forEach((t) => charSet.add(t.name.trim().toUpperCase()));
 
-  // Combine prop tags + deterministic prop mentions inside ACTION/DIALOGUE elements
+  // Combine prop tags + deterministic prop mentions inside ACTION/DIALOGUE/VOICE_OVER elements
   const propSet = new Set<string>();
   tags
     .filter((t) => t.category === 'prop' && t.sceneIds.includes(scene.id))
     .forEach((t) => propSet.add(t.name.trim()));
   sceneElements.forEach((el) => {
-    if (el.type === 'ACTION' || el.type === 'DIALOGUE') {
+    if (el.type === 'ACTION' || el.type === 'DIALOGUE' || el.type === 'VOICE_OVER') {
       const matches = el.text.match(PROP_KEYWORD_REGEX);
       if (matches) {
         matches.forEach((m) => {
@@ -127,6 +156,7 @@ export const deriveLiveSceneSnapshot = (
     storyDay: scene.storyDay,
     timeOfDay: scene.timeOfDay,
     characters: Array.from(charSet).sort(),
+    voiceOverCharacters: Array.from(voCharSet).sort(),
     props: Array.from(propSet).sort(),
     wardrobe: Array.from(wardrobeSet).sort(),
   };
@@ -275,6 +305,14 @@ export const computeRevisionImpact = (project: StoryProject): RevisionImpactRepo
     const envChanged = live.intExt !== refIntExt || live.dayNight !== refDayNight;
     const eighthsDelta = live.eighths - refEighths;
 
+    const refVoChars = (prev?.voiceOverCharacters || existingStrip?.voiceOverCharacters || []).map((c) =>
+      c.trim().toUpperCase()
+    );
+    const liveVoChars = live.voiceOverCharacters || [];
+    const voChanged =
+      refVoChars.length !== liveVoChars.length ||
+      liveVoChars.some((c) => !refVoChars.includes(c));
+
     const shootDayLabel = findStripShootDay(project.strips, scene.id);
     const conflicts = evaluateCastConflicts(
       scene.id,
@@ -312,6 +350,7 @@ export const computeRevisionImpact = (project: StoryProject): RevisionImpactRepo
       addedProps.length > 0 ||
       removedProps.length > 0 ||
       addedWardrobe.length > 0 ||
+      voChanged ||
       eighthsDelta !== 0;
 
     if (hasSceneDelta) {
@@ -403,6 +442,7 @@ export const commitScriptToScheduleSync = (
       pages: snap.pages,
       eighths: snap.eighths,
       characters: snap.characters,
+      voiceOverCharacters: snap.voiceOverCharacters,
       colorClass: getStripColorClass(snap.intExt, snap.dayNight),
     };
   });
@@ -424,6 +464,7 @@ export const commitScriptToScheduleSync = (
         storyDay: snap.storyDay,
         scheduledDuration: '01:30',
         characters: snap.characters,
+        voiceOverCharacters: snap.voiceOverCharacters,
         timeOfDay: snap.timeOfDay,
         colorClass: getStripColorClass(snap.intExt, snap.dayNight),
       });

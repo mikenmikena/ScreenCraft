@@ -3,6 +3,7 @@ export type ElementType =
   | 'ACTION'
   | 'CHARACTER'
   | 'DIALOGUE'
+  | 'VOICE_OVER'
   | 'PARENTHETICAL'
   | 'TRANSITION'
   | 'SHOT'
@@ -27,6 +28,7 @@ export interface ScreenplayElement {
   shotType?: string;
   character?: string;
   dualDialogue?: boolean;
+  lastEditedAt?: string;
 }
 
 export interface Scene {
@@ -90,6 +92,7 @@ export interface StripboardStrip {
   storyDay?: number;
   scheduledDuration?: string;
   characters?: string[];
+  voiceOverCharacters?: string[];
   timeOfDay?: string;
   bannerTitle?: string;
   bannerDate?: string;
@@ -283,6 +286,7 @@ export interface NLEDialogueEntry {
   startSec: number;
   endSec: number;
   estimatedDurationSec: number;
+  isVoiceOver?: boolean;
 }
 
 export interface NLEBlockMetadata {
@@ -309,15 +313,48 @@ export interface NLEBlockMetadata {
   tags: string[];
 }
 
+export type NLETargetSoftware =
+  | 'Adobe Premiere Pro'
+  | 'DaVinci Resolve'
+  | 'Avid Media Composer'
+  | 'Custom NLE';
+
+export interface NLEExportConfig {
+  nleTarget: NLETargetSoftware;
+  frameRate: NLEFrameRate;
+  preferredFormat: 'xml' | 'json';
+  timecodeStart: '00:00:00:00' | '01:00:00:00';
+  includeSceneMarkers: boolean;
+  includeDialogueCues: boolean;
+  includeCameraMetadata: boolean;
+  includePropAndTagMetadata: boolean;
+  includeAlignedTakes: boolean;
+  includeTranscriptTokens: boolean;
+  markerColorProfile: 'premiere' | 'resolve' | 'avid';
+  filenameSuffix: string;
+}
+
+export interface NLEExportPreset {
+  id: string;
+  name: string;
+  nleTarget: NLETargetSoftware;
+  description: string;
+  isBuiltIn?: boolean;
+  updatedAt: string;
+  config: NLEExportConfig;
+}
+
 export interface NLEMetadataDocument {
   schemaVersion: string;
   exportedAt: string;
-  nleTarget: 'Adobe Premiere Pro (XMEML v4)' | 'Canonical NLE Sidecar JSON';
+  nleTarget: string;
+  presetName?: string;
   projectId: string;
   projectTitle: string;
   draftName: string;
   frameRate: NLEFrameRate;
   dropFrame: boolean;
+  timecodeStart?: '00:00:00:00' | '01:00:00:00';
   totalDurationSec: number;
   scenes: Array<{
     sceneId: string;
@@ -390,6 +427,38 @@ export interface NLEGeneratedSidecarEntry {
   scriptSnapshotHash: string;
 }
 
+export interface CharacterScheduleSlot {
+  sceneId: string;
+  sceneNumber: number;
+  sceneHeading: string;
+  location: string;
+  shootDayIndex: number;
+  shootDayLabel: string;
+  timeOfDay: string;
+  startMin: number | null;
+  endMin: number | null;
+  timeWindowLabel: string;
+}
+
+export interface CharacterSimultaneousLocationConflict {
+  id: string;
+  characterName: string;
+  color: string;
+  shootDayIndex: number;
+  shootDayLabel: string;
+  slotA: CharacterScheduleSlot;
+  slotB: CharacterScheduleSlot;
+  reason: string;
+}
+
+export interface CharacterPresenceCrossRefReport {
+  conflicts: CharacterSimultaneousLocationConflict[];
+  conflictsBySceneId: Record<string, CharacterSimultaneousLocationConflict[]>;
+  conflictsByCharacter: Record<string, CharacterSimultaneousLocationConflict[]>;
+  sceneSlotsBySceneId: Record<string, CharacterScheduleSlot>;
+  characterColors: Record<string, string>;
+}
+
 // ==========================================
 // 2. Live Script-to-Schedule Sync Types
 // ==========================================
@@ -407,6 +476,7 @@ export interface ScheduleSceneSnapshot {
   storyDay: number;
   timeOfDay: string;
   characters: string[];
+  voiceOverCharacters?: string[];
   props: string[];
   wardrobe: string[];
 }
@@ -483,6 +553,26 @@ export interface ResearchNote {
   createdAt: string;
 }
 
+export type CharacterRelationshipPolarity =
+  | 'conflict'
+  | 'alliance'
+  | 'hierarchy'
+  | 'emotional'
+  | 'mystery'
+  | 'neutral';
+
+export interface CharacterRelationshipEdge {
+  id: string;
+  sourceCharacter: string;
+  targetCharacter: string;
+  label: string;
+  polarity: CharacterRelationshipPolarity;
+  direction: 'mutual' | 'source_to_target' | 'target_to_source';
+  storyDriver: string;
+  arcShift?: string;
+  updatedAt?: string;
+}
+
 export interface ProjectBible {
   logline: string;
   genre: string;
@@ -493,6 +583,43 @@ export interface ProjectBible {
   characterBios: CharacterBio[];
   pitchDocs: PitchSection[];
   researchNotes: ResearchNote[];
+}
+
+export type ContinuityConflictSeverity = 'conflict' | 'warning';
+
+export type ContinuityConflictCategory =
+  | 'costume_mismatch'
+  | 'costume_condition'
+  | 'prop_mismatch'
+  | 'prop_state'
+  | 'wardrobe_slot_change';
+
+export type ContinuityTargetType = 'character' | 'location';
+
+export interface ContinuityOccurrenceRef {
+  sceneId: string;
+  sceneNumber: number;
+  sceneHeading: string;
+  storyDay?: number;
+  elementId: string;
+  elementType: ElementType;
+  excerpt: string;
+  matchedPhrase: string;
+  descriptors: string[];
+}
+
+export interface SceneContinuityAlert {
+  id: string;
+  severity: ContinuityConflictSeverity;
+  category: ContinuityConflictCategory;
+  domain: 'costume' | 'prop';
+  targetType: ContinuityTargetType;
+  targetName: string;
+  itemName: string;
+  title: string;
+  explanation: string;
+  previous: ContinuityOccurrenceRef;
+  current: ContinuityOccurrenceRef;
 }
 
 export interface StoryProject {
@@ -515,9 +642,12 @@ export interface StoryProject {
   characterBreakdowns?: CharacterBreakdownOverride[];
   scriptFormat?: ScriptFormatMode;
   projectBible?: ProjectBible;
+  characterRelationships?: CharacterRelationshipEdge[];
+  characterNodePositions?: Record<string, { x: number; y: number }>;
   scheduleBaseline?: ScheduleSceneSnapshot[];
   lastScheduleSyncAt?: string;
   generatedMetadataLog?: NLEGeneratedSidecarEntry[];
+  acknowledgedContinuityIds?: string[];
 }
 
 export type ActiveWorkspace =
@@ -527,4 +657,5 @@ export type ActiveWorkspace =
   | 'project_bible'
   | 'rust_engine'
   | 'projects';
+
 

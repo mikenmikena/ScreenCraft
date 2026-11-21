@@ -16,7 +16,8 @@ import {
   CharacterBreakdownOverride,
   ScriptFormatMode,
   ProjectBible,
-  NLEGeneratedSidecarEntry
+  NLEGeneratedSidecarEntry,
+  CharacterRelationshipEdge
 } from './types/story';
 import { SAMPLE_PROJECTS } from './data/sampleScripts';
 import { TopHeader } from './components/TopHeader';
@@ -36,6 +37,10 @@ import { ExportModal } from './components/ExportModal';
 import { ReportsModal } from './components/ReportsModal';
 import { NLEMetadataModal } from './components/NLEMetadataModal';
 import { RevisionImpactModal } from './components/RevisionImpactModal';
+import { TeleprompterWindow } from './components/TeleprompterWindow';
+import { SceneContinuityModal } from './components/SceneContinuityModal';
+import { HelpGuideModal, HelpSectionCategory } from './components/HelpGuideModal';
+import { QuickNotesSidebar } from './components/QuickNotesSidebar';
 import { parseFountain } from './utils/screenplayParser';
 import { generateRustDesktopZip } from './utils/rustDesktopGenerator';
 import {
@@ -43,6 +48,9 @@ import {
   commitScriptToScheduleSync,
   syncStripboardToScript,
 } from './utils/liveScheduleSync';
+import { computeRevisionPassCounts } from './utils/revisionPass';
+import { analyzeSceneContinuity } from './utils/sceneContinuityCheck';
+import { ExportFormatType } from './utils/exportPreviewFormatter';
 import { Upload, X, Clock, Save, CheckCircle } from 'lucide-react';
 
 const STORAGE_KEY_PROJECTS = 'adobe_story_projects_v1';
@@ -56,13 +64,23 @@ export default function App() {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          // Ensure legacy saved projects inherit sample crewMembers if absent
+          // Ensure legacy saved projects inherit sample crewMembers / characterRelationships if absent
           return parsed.map((proj: StoryProject) => {
-            if (Array.isArray(proj.crewMembers)) return proj;
             const sampleMatch = SAMPLE_PROJECTS.find((sp) => sp.id === proj.id);
+            if (
+              Array.isArray(proj.crewMembers) &&
+              (proj.characterRelationships !== undefined || !sampleMatch?.characterRelationships)
+            ) {
+              return proj;
+            }
             return {
               ...proj,
-              crewMembers: sampleMatch?.crewMembers || [],
+              crewMembers: Array.isArray(proj.crewMembers)
+                ? proj.crewMembers
+                : sampleMatch?.crewMembers || [],
+              ...(proj.characterRelationships === undefined && sampleMatch?.characterRelationships
+                ? { characterRelationships: sampleMatch.characterRelationships }
+                : {}),
             };
           });
         }
@@ -97,19 +115,34 @@ export default function App() {
   const [activeWorkspace, setActiveWorkspace] = useState<ActiveWorkspace>('authoring');
   const [productionSubView, setProductionSubView] = useState<'stripboard' | 'cast_crew' | 'location_map'>('stripboard');
   const [directoryInitialView, setDirectoryInitialView] = useState<
-    'roster' | 'character_breakdown' | 'timeline' | 'budget' | 'call_sheet'
+    'roster' | 'gallery' | 'character_breakdown' | 'connections' | 'timeline' | 'budget' | 'call_sheet'
   >('roster');
   const [callSheetDayNumber, setCallSheetDayNumber] = useState<number | null>(null);
   const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null);
+  const [focusedElementId, setFocusedElementId] = useState<string | null>(null);
   const [currentElementType, setCurrentElementType] = useState<ElementType>('SCENE_HEADING');
   const [zoomLevel, setZoomLevel] = useState<number>(100);
 
   // Modals & Popups
   const [isExportOpen, setIsExportOpen] = useState(false);
+  const [initialExportFormat, setInitialExportFormat] = useState<ExportFormatType>('pdf');
   const [isReportsOpen, setIsReportsOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isNLEPipelineOpen, setIsNLEPipelineOpen] = useState(false);
   const [isRevisionImpactOpen, setIsRevisionImpactOpen] = useState(false);
+  const [isTeleprompterOpen, setIsTeleprompterOpen] = useState(false);
+  const [isContinuityModalOpen, setIsContinuityModalOpen] = useState(false);
+  const [isHelpGuideOpen, setIsHelpGuideOpen] = useState(false);
+  const [helpInitialCategory, setHelpInitialCategory] = useState<HelpSectionCategory>('all');
+  const [helpInitialToolId, setHelpInitialToolId] = useState<string | undefined>(undefined);
+  const [isLeftPanelCollapsed, setIsLeftPanelCollapsed] = useState(false);
+  const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
+  const [isQuickNotesOpen, setIsQuickNotesOpen] = useState(false);
+  const [inspectorRequestedTab, setInspectorRequestedTab] = useState<{
+    tab: 'comments' | 'tags' | 'properties' | 'shots' | 'history' | 'continuity';
+    nonce: number;
+  } | null>(null);
+  const [isRevisionPassMode, setIsRevisionPassMode] = useState(false);
   const [importText, setImportText] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [gmpQuotaExceeded, setGmpQuotaExceeded] = useState(false);
@@ -134,6 +167,16 @@ export default function App() {
 
   const revisionImpactReport = React.useMemo(
     () => computeRevisionImpact(currentProject),
+    [currentProject]
+  );
+
+  const revisionPassCounts = React.useMemo(
+    () => computeRevisionPassCounts(currentProject.elements, currentProject.revisions || []),
+    [currentProject.elements, currentProject.revisions]
+  );
+
+  const continuityReport = React.useMemo(
+    () => analyzeSceneContinuity(currentProject),
     [currentProject]
   );
 
@@ -207,10 +250,11 @@ export default function App() {
       initialElementTextsRef.current.set(id, existingEl ? existingEl.text : '');
     }
 
-    // 2. Immediately update element text in state for zero keystroke latency
+    // 2. Immediately update element text & lastEditedAt in state for zero keystroke latency
+    const editedIso = new Date().toISOString();
     updateCurrentProject((proj) => {
       const updatedElements = proj.elements.map((el) =>
-        el.id === id ? { ...el, text } : el
+        el.id === id ? { ...el, text, lastEditedAt: editedIso } : el
       );
       return { ...proj, elements: updatedElements };
     });
@@ -264,13 +308,62 @@ export default function App() {
     debounceRevisionTimerRef.current.set(id, timer);
   };
 
+  const findPrecedingCharacterName = (
+    elementsList: ScreenplayElement[],
+    atIndex: number
+  ): string | undefined => {
+    for (let i = atIndex; i >= 0; i--) {
+      const candidate = elementsList[i];
+      if (candidate.type === 'CHARACTER' && candidate.text.trim()) {
+        return candidate.text.replace(/\(.*?\)/g, '').trim().toUpperCase() || undefined;
+      }
+      if ((candidate.type === 'DIALOGUE' || candidate.type === 'VOICE_OVER') && candidate.character) {
+        return candidate.character.replace(/\(.*?\)/g, '').trim().toUpperCase() || undefined;
+      }
+      if (
+        candidate.type === 'SCENE_HEADING' ||
+        candidate.type === 'ACTION' ||
+        candidate.type === 'TRANSITION' ||
+        candidate.type === 'SHOT'
+      ) {
+        break;
+      }
+    }
+    return undefined;
+  };
+
+  const handleUpdateElementCharacter = (id: string, character: string) => {
+    const cleaned = character.replace(/\(.*?\)/g, '').trim().toUpperCase();
+    const editedIso = new Date().toISOString();
+    updateCurrentProject((proj) => ({
+      ...proj,
+      elements: proj.elements.map((el) =>
+        el.id === id ? { ...el, character: cleaned || undefined, lastEditedAt: editedIso } : el
+      ),
+    }));
+  };
+
   const handleUpdateElementType = (id: string, type: ElementType) => {
     setCurrentElementType(type);
+    const editedIso = new Date().toISOString();
     updateCurrentProject((proj) => {
-      const target = proj.elements.find((el) => el.id === id);
+      const targetIndex = proj.elements.findIndex((el) => el.id === id);
+      const target = targetIndex >= 0 ? proj.elements[targetIndex] : undefined;
       const scene = proj.scenes.find((s) => s.id === target?.sceneId) || proj.scenes[0];
+      const inheritedCharacter =
+        (type === 'VOICE_OVER' || type === 'DIALOGUE') && target && !target.character
+          ? findPrecedingCharacterName(proj.elements, targetIndex - 1)
+          : target?.character;
+
       const updatedElements = proj.elements.map((el) =>
-        el.id === id ? { ...el, type } : el
+        el.id === id
+          ? {
+              ...el,
+              type,
+              lastEditedAt: editedIso,
+              ...(inheritedCharacter ? { character: inheritedCharacter } : {}),
+            }
+          : el
       );
 
       let updatedRevisions = proj.revisions || [];
@@ -301,15 +394,30 @@ export default function App() {
 
   const handleAddElementAfter = (afterId: string, type: ElementType, text: string = '') => {
     setCurrentElementType(type);
-    const newElement: ScreenplayElement = {
-      id: `el-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-      type,
-      text,
-      sceneId: selectedSceneId || undefined,
-    };
+    const newId = `el-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
+    setFocusedElementId(newId);
 
     updateCurrentProject((proj) => {
       const index = proj.elements.findIndex((el) => el.id === afterId);
+      const anchorEl = index >= 0 ? proj.elements[index] : proj.elements[proj.elements.length - 1];
+      const inheritedSceneId = anchorEl?.sceneId || selectedSceneId || proj.scenes[0]?.id;
+      const inheritedChar =
+        type === 'VOICE_OVER' || type === 'DIALOGUE'
+          ? findPrecedingCharacterName(
+              proj.elements,
+              index >= 0 ? index : proj.elements.length - 1
+            )
+          : undefined;
+
+      const newElement: ScreenplayElement = {
+        id: newId,
+        type,
+        text,
+        sceneId: inheritedSceneId,
+        lastEditedAt: new Date().toISOString(),
+        ...(inheritedChar ? { character: inheritedChar } : {}),
+      };
+
       const newElements = [...proj.elements];
       if (index >= 0) {
         newElements.splice(index + 1, 0, newElement);
@@ -317,7 +425,7 @@ export default function App() {
         newElements.push(newElement);
       }
 
-      const scene = proj.scenes.find((s) => s.id === (selectedSceneId || newElement.sceneId)) || proj.scenes[0];
+      const scene = proj.scenes.find((s) => s.id === inheritedSceneId) || proj.scenes[0];
       const rev: ScreenplayRevision = {
         id: `rev-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
         timestamp: new Date().toISOString(),
@@ -431,11 +539,17 @@ export default function App() {
         showToast('Restored deleted element');
       } else if (revision.elementId && revision.previousText !== undefined) {
         // Revert text change
+        const revertedIso = new Date().toISOString();
         const exists = updatedElements.some((el) => el.id === revision.elementId);
         if (exists) {
           updatedElements = updatedElements.map((el) =>
             el.id === revision.elementId
-              ? { ...el, text: revision.previousText!, type: revision.elementType || el.type }
+              ? {
+                  ...el,
+                  text: revision.previousText!,
+                  type: revision.elementType || el.type,
+                  lastEditedAt: revertedIso,
+                }
               : el
           );
         } else {
@@ -444,6 +558,7 @@ export default function App() {
             type: revision.elementType || 'ACTION',
             text: revision.previousText,
             sceneId: revision.sceneId,
+            lastEditedAt: revertedIso,
           });
         }
         showToast(`Reverted edit: original text restored`);
@@ -590,6 +705,24 @@ export default function App() {
     updateCurrentProject((proj) => ({
       ...proj,
       projectBible: bible,
+    }));
+  };
+
+  const handleUpdateCharacterRelationships = (
+    characterRelationships: CharacterRelationshipEdge[]
+  ) => {
+    updateCurrentProject((proj) => ({
+      ...proj,
+      characterRelationships,
+    }));
+  };
+
+  const handleUpdateCharacterNodePositions = (
+    characterNodePositions: Record<string, { x: number; y: number }>
+  ) => {
+    updateCurrentProject((proj) => ({
+      ...proj,
+      characterNodePositions,
     }));
   };
 
@@ -972,6 +1105,40 @@ export default function App() {
     showToast('Cleared generated NLE metadata log');
   };
 
+  const handleAcknowledgeContinuity = (alertId: string) => {
+    updateCurrentProject((proj) => {
+      const existing = new Set(proj.acknowledgedContinuityIds || []);
+      existing.add(alertId);
+      return {
+        ...proj,
+        acknowledgedContinuityIds: Array.from(existing),
+      };
+    });
+    showToast('Continuity alert dismissed');
+  };
+
+  const handleRestoreContinuity = (alertId: string) => {
+    updateCurrentProject((proj) => ({
+      ...proj,
+      acknowledgedContinuityIds: (proj.acknowledgedContinuityIds || []).filter(
+        (id) => id !== alertId
+      ),
+    }));
+    showToast('Continuity alert restored');
+  };
+
+  const handleJumpToContinuityOccurrence = (sceneId: string, elementId?: string) => {
+    setSelectedSceneId(sceneId);
+    if (elementId) {
+      setFocusedElementId(elementId);
+      const matched = currentProject.elements.find((e) => e.id === elementId);
+      if (matched) setCurrentElementType(matched.type);
+    }
+    setActiveWorkspace('authoring');
+    setIsRightPanelCollapsed(false);
+    setInspectorRequestedTab({ tab: 'continuity', nonce: Date.now() });
+  };
+
   // Export handlers
   const handleExport = async (
     format: 'pdf' | 'fdx' | 'fountain' | 'json' | 'csv' | 'rust_zip'
@@ -992,6 +1159,7 @@ export default function App() {
         console.error(e);
       }
     } else {
+      setInitialExportFormat(format);
       setIsExportOpen(true);
     }
   };
@@ -1102,12 +1270,21 @@ export default function App() {
         timeOfDay: sc.timeOfDay,
       })),
       characters: Array.from(
-        new Set(parsed.elements.filter((e) => e.type === 'CHARACTER').map((e) => e.text.trim()))
+        new Set(
+          parsed.elements
+            .filter((e) => e.type === 'CHARACTER')
+            .map((e) => (e.character || e.text.replace(/\s*\([^)]*\)$/, '')).trim())
+            .filter(Boolean)
+        )
       ).map((name, i) => ({
         name,
         color: ['#00d2d3', '#ff6b6b', '#feca57', '#54a0ff', '#1dd1a1'][i % 5],
         scenesCount: parsed.scenes.filter((s) => s.characters.includes(name)).length,
-        speakingLines: parsed.elements.filter((e) => e.type === 'CHARACTER' && e.text.trim() === name).length,
+        speakingLines: parsed.elements.filter(
+          (e) =>
+            e.type === 'CHARACTER' &&
+            (e.character || e.text.replace(/\s*\([^)]*\)$/, '')).trim() === name
+        ).length,
       })),
     };
 
@@ -1151,6 +1328,7 @@ export default function App() {
         activeWorkspace={activeWorkspace}
         onSelectWorkspace={setActiveWorkspace}
         projectTitle={currentProject.title}
+        onOpenTeleprompter={() => setIsTeleprompterOpen(true)}
       />
 
       {/* Menu Bar with Working Menus */}
@@ -1163,7 +1341,9 @@ export default function App() {
         onOpenReports={() => setIsReportsOpen(true)}
         onAddElement={(type) =>
           handleAddElementAfter(
-            currentProject.elements[currentProject.elements.length - 1]?.id || 'root',
+            focusedElementId ||
+              currentProject.elements[currentProject.elements.length - 1]?.id ||
+              'root',
             type
           )
         }
@@ -1171,6 +1351,7 @@ export default function App() {
         onOpenSample={(sampleId) => {
           setCurrentProjectId(sampleId);
           setSelectedSceneId(null);
+          setFocusedElementId(null);
           showToast('Sample screenplay loaded');
         }}
         onAddDayBreak={handleAddDayBreak}
@@ -1197,6 +1378,14 @@ export default function App() {
         }}
         onOpenNLEPipeline={() => setIsNLEPipelineOpen(true)}
         onOpenRevisionImpact={() => setIsRevisionImpactOpen(true)}
+        onOpenTeleprompter={() => setIsTeleprompterOpen(true)}
+        onOpenContinuityCheck={() => setIsContinuityModalOpen(true)}
+        continuityAlertCount={continuityReport.summary.totalActive}
+        onOpenHelpGuide={(category = 'all', toolId) => {
+          setHelpInitialCategory(category);
+          setHelpInitialToolId(toolId);
+          setIsHelpGuideOpen(true);
+        }}
         currentProject={currentProject}
         sampleProjects={projects}
       />
@@ -1208,11 +1397,13 @@ export default function App() {
           currentElementType={currentElementType}
           onChangeElementType={(type) => {
             setCurrentElementType(type);
-            if (currentProject.elements.length > 0) {
-              handleUpdateElementType(
-                currentProject.elements[currentProject.elements.length - 1].id,
-                type
-              );
+            const targetId =
+              (focusedElementId &&
+                currentProject.elements.some((el) => el.id === focusedElementId) &&
+                focusedElementId) ||
+              currentProject.elements[currentProject.elements.length - 1]?.id;
+            if (targetId) {
+              handleUpdateElementType(targetId, type);
             }
           }}
           documentTitle={currentProject.title}
@@ -1222,8 +1413,25 @@ export default function App() {
           scriptFormat={currentProject.scriptFormat || 'single_column_film'}
           onChangeScriptFormat={handleChangeScriptFormat}
           onOpenNLEPipeline={() => setIsNLEPipelineOpen(true)}
+          onOpenTeleprompter={() => setIsTeleprompterOpen(true)}
           pendingSyncCount={revisionImpactReport.totalImpactedScenes}
           onOpenRevisionImpact={() => setIsRevisionImpactOpen(true)}
+          continuityAlertCount={continuityReport.summary.totalActive}
+          onOpenContinuityCheck={() => setIsContinuityModalOpen(true)}
+          isRevisionPassMode={isRevisionPassMode}
+          onToggleRevisionPassMode={() => setIsRevisionPassMode((prev) => !prev)}
+          revisionPassCounts={revisionPassCounts}
+          isLeftPanelCollapsed={isLeftPanelCollapsed}
+          isRightPanelCollapsed={isRightPanelCollapsed}
+          onToggleLeftPanel={() => setIsLeftPanelCollapsed((prev) => !prev)}
+          onToggleRightPanel={() => setIsRightPanelCollapsed((prev) => !prev)}
+          onToggleFocusCenter={() => {
+            const bothCollapsed = isLeftPanelCollapsed && isRightPanelCollapsed;
+            setIsLeftPanelCollapsed(!bothCollapsed);
+            setIsRightPanelCollapsed(!bothCollapsed);
+          }}
+          isQuickNotesOpen={isQuickNotesOpen}
+          onToggleQuickNotes={() => setIsQuickNotesOpen((prev) => !prev)}
           zoomLevel={zoomLevel}
           onChangeZoom={setZoomLevel}
         />
@@ -1243,35 +1451,74 @@ export default function App() {
               onUpdateScene={handleUpdateScene}
               characters={currentProject.characters}
               activeWorkspace={activeWorkspace}
+              isCollapsed={isLeftPanelCollapsed}
+              onToggleCollapse={() => setIsLeftPanelCollapsed((prev) => !prev)}
             />
 
             {/* Column 2 & 3: Authoring Editor OR Production Stripboard / Cast & Crew Address Book */}
             {activeWorkspace === 'authoring' ? (
               <>
-                <ScreenplayEditor
-                  elements={currentProject.elements}
-                  scenes={currentProject.scenes}
-                  comments={currentProject.comments}
-                  tags={currentProject.tags}
-                  storyboards={currentProject.storyboards || []}
-                  scriptFormat={currentProject.scriptFormat || 'single_column_film'}
-                  onChangeScriptFormat={handleChangeScriptFormat}
-                  onAddStoryboardImageForScene={handleAddStoryboardImageForScene}
-                  onUpdateElement={handleUpdateElement}
-                  onUpdateElementType={handleUpdateElementType}
-                  onAddElementAfter={handleAddElementAfter}
-                  onDeleteElement={handleDeleteElement}
-                  onSelectScene={setSelectedSceneId}
-                  onOpenComment={(id) => {
-                    const comm = currentProject.comments.find((c) => c.id === id);
-                    if (comm) showToast(`Comment by ${comm.author}: "${comm.text}"`);
-                  }}
-                  onAddCommentForElement={(elId) => {
-                    const text = prompt('Enter review note for this element:');
-                    if (text) handleAddComment(text, elId);
-                  }}
-                  zoomLevel={zoomLevel}
-                />
+                <div className="relative flex-1 flex min-w-0 min-h-0">
+                  <ScreenplayEditor
+                    elements={currentProject.elements}
+                    scenes={currentProject.scenes}
+                    comments={currentProject.comments}
+                    tags={currentProject.tags}
+                    characters={currentProject.characters}
+                    storyboards={currentProject.storyboards || []}
+                    revisions={currentProject.revisions || []}
+                    isRevisionPassMode={isRevisionPassMode}
+                    continuityAlertsByElementId={continuityReport.alertsByElementId}
+                    focusedElementId={focusedElementId}
+                    onInspectContinuityElement={(elId) => {
+                      setFocusedElementId(elId);
+                      setIsRightPanelCollapsed(false);
+                      setInspectorRequestedTab({ tab: 'continuity', nonce: Date.now() });
+                    }}
+                    scriptFormat={currentProject.scriptFormat || 'single_column_film'}
+                    onChangeScriptFormat={handleChangeScriptFormat}
+                    onAddStoryboardImageForScene={handleAddStoryboardImageForScene}
+                    onUpdateElement={handleUpdateElement}
+                    onUpdateElementType={handleUpdateElementType}
+                    onUpdateElementCharacter={handleUpdateElementCharacter}
+                    onAddElementAfter={handleAddElementAfter}
+                    onDeleteElement={handleDeleteElement}
+                    onSelectScene={setSelectedSceneId}
+                    onFocusElement={(el) => {
+                      setFocusedElementId(el.id);
+                      setCurrentElementType(el.type);
+                    }}
+                    onOpenComment={(id) => {
+                      const comm = currentProject.comments.find((c) => c.id === id);
+                      if (comm) showToast(`Comment by ${comm.author}: "${comm.text}"`);
+                    }}
+                    onAddCommentForElement={(elId) => {
+                      const text = prompt('Enter review note for this element:');
+                      if (text) handleAddComment(text, elId);
+                    }}
+                    zoomLevel={zoomLevel}
+                  />
+
+                  <QuickNotesSidebar
+                    projectId={currentProject.id}
+                    projectTitle={currentProject.title}
+                    selectedScene={currentProject.scenes.find((s) => s.id === selectedSceneId)}
+                    isOpen={isQuickNotesOpen}
+                    onToggleOpen={() => setIsQuickNotesOpen((prev) => !prev)}
+                    onSelectScene={setSelectedSceneId}
+                    onPromoteToScript={(noteText, targetType) => {
+                      const anchorId =
+                        (focusedElementId &&
+                          currentProject.elements.some((el) => el.id === focusedElementId) &&
+                          focusedElementId) ||
+                        currentProject.elements[currentProject.elements.length - 1]?.id ||
+                        'root';
+                      handleAddElementAfter(anchorId, targetType, noteText);
+                      showToast('Inserted note into screenplay');
+                    }}
+                    onNotify={showToast}
+                  />
+                </div>
 
                 <InspectorColumn
                   selectedScene={currentProject.scenes.find((s) => s.id === selectedSceneId)}
@@ -1292,10 +1539,19 @@ export default function App() {
                   onAddStoryboardFrame={handleQuickAddStoryboardFrame}
                   onRevertRevision={handleRevertRevision}
                   onCreateDraftMilestone={handleCreateDraftMilestone}
+                  continuityReport={continuityReport}
+                  onJumpToOccurrence={handleJumpToContinuityOccurrence}
+                  onAcknowledgeContinuity={handleAcknowledgeContinuity}
+                  onRestoreContinuity={handleRestoreContinuity}
+                  onOpenContinuityModal={() => setIsContinuityModalOpen(true)}
+                  requestedTab={inspectorRequestedTab}
+                  isCollapsed={isRightPanelCollapsed}
+                  onToggleCollapse={() => setIsRightPanelCollapsed((prev) => !prev)}
                 />
               </>
             ) : productionSubView === 'cast_crew' ? (
               <CastCrewDirectory
+                project={currentProject}
                 projectTitle={currentProject.title}
                 projectAuthor={currentProject.author}
                 draftName={currentProject.activeDraftName}
@@ -1317,6 +1573,8 @@ export default function App() {
                 onUpdateCharacterBreakdown={handleUpdateCharacterBreakdown}
                 onResetCharacterBreakdown={handleResetCharacterBreakdown}
                 onCreateCharacterTag={handleCreateCharacterTag}
+                onUpdateCharacterRelationships={handleUpdateCharacterRelationships}
+                onUpdateCharacterNodePositions={handleUpdateCharacterNodePositions}
                 locationCount={uniqueLocationCount}
                 onSwitchSubView={(view) => {
                   if (view === 'cast_crew') setDirectoryInitialView('roster');
@@ -1349,6 +1607,8 @@ export default function App() {
                 <StripboardView
                   strips={currentProject.strips}
                   scenes={currentProject.scenes}
+                  elements={currentProject.elements}
+                  locations={currentProject.locations}
                   selectedSceneId={selectedSceneId}
                   onSelectScene={setSelectedSceneId}
                   onUpdateStrips={handleUpdateStrips}
@@ -1358,6 +1618,7 @@ export default function App() {
                   locationCount={uniqueLocationCount}
                   pendingSyncCount={revisionImpactReport.totalImpactedScenes}
                   onOpenRevisionImpact={() => setIsRevisionImpactOpen(true)}
+                  onNotify={showToast}
                   onSwitchSubView={(view) => {
                     if (view === 'cast_crew') setDirectoryInitialView('roster');
                     setProductionSubView(view);
@@ -1388,6 +1649,14 @@ export default function App() {
                   onAddStoryboardFrame={handleQuickAddStoryboardFrame}
                   onRevertRevision={handleRevertRevision}
                   onCreateDraftMilestone={handleCreateDraftMilestone}
+                  continuityReport={continuityReport}
+                  onJumpToOccurrence={handleJumpToContinuityOccurrence}
+                  onAcknowledgeContinuity={handleAcknowledgeContinuity}
+                  onRestoreContinuity={handleRestoreContinuity}
+                  onOpenContinuityModal={() => setIsContinuityModalOpen(true)}
+                  requestedTab={inspectorRequestedTab}
+                  isCollapsed={isRightPanelCollapsed}
+                  onToggleCollapse={() => setIsRightPanelCollapsed((prev) => !prev)}
                 />
               </>
             )}
@@ -1399,6 +1668,8 @@ export default function App() {
           <ProjectContainerView
             project={currentProject}
             onUpdateProjectBible={handleUpdateProjectBible}
+            onUpdateRelationships={handleUpdateCharacterRelationships}
+            onUpdateNodePositions={handleUpdateCharacterNodePositions}
             onSwitchScriptFormat={handleChangeScriptFormat}
             onOpenAuthoring={() => setActiveWorkspace('authoring')}
             onOpenStoryboard={() => setActiveWorkspace('storyboard')}
@@ -1496,6 +1767,7 @@ export default function App() {
       {isExportOpen && (
         <ExportModal
           project={currentProject}
+          initialFormat={initialExportFormat}
           onClose={() => setIsExportOpen(false)}
           onRecordGeneratedSidecar={handleRecordGeneratedSidecar}
         />
@@ -1528,6 +1800,76 @@ export default function App() {
       {/* Reports Modal */}
       {isReportsOpen && (
         <ReportsModal project={currentProject} onClose={() => setIsReportsOpen(false)} />
+      )}
+
+      {/* Dedicated White-on-Black Teleprompter Window */}
+      {isTeleprompterOpen && (
+        <TeleprompterWindow
+          projects={projects}
+          initialProjectId={currentProject.id}
+          onClose={() => setIsTeleprompterOpen(false)}
+        />
+      )}
+
+      {/* Automated Scene Continuity Check Modal */}
+      {isContinuityModalOpen && (
+        <SceneContinuityModal
+          projectTitle={currentProject.title}
+          report={continuityReport}
+          onJumpToOccurrence={handleJumpToContinuityOccurrence}
+          onAcknowledgeAlert={handleAcknowledgeContinuity}
+          onRestoreAlert={handleRestoreContinuity}
+          onClose={() => setIsContinuityModalOpen(false)}
+        />
+      )}
+
+      {/* Interactive User Guide & Tool Documentation */}
+      {isHelpGuideOpen && (
+        <HelpGuideModal
+          initialCategory={helpInitialCategory}
+          initialToolId={helpInitialToolId}
+          actions={{
+            onSelectWorkspace: setActiveWorkspace,
+            onOpenContinuityCheck: () => setIsContinuityModalOpen(true),
+            onToggleRevisionPassMode: () => setIsRevisionPassMode((prev) => !prev),
+            isRevisionPassMode,
+            onOpenTeleprompter: () => setIsTeleprompterOpen(true),
+            onOpenNLEPipeline: () => setIsNLEPipelineOpen(true),
+            onOpenExportModal: () => setIsExportOpen(true),
+            onOpenReports: () => setIsReportsOpen(true),
+            onOpenCastCrew: () => {
+              setDirectoryInitialView('roster');
+              setActiveWorkspace('production');
+              setProductionSubView('cast_crew');
+            },
+            onOpenCharacterConnections: () => {
+              setDirectoryInitialView('connections');
+              setActiveWorkspace('production');
+              setProductionSubView('cast_crew');
+            },
+            onOpenCallSheet: () => {
+              setCallSheetDayNumber(null);
+              setDirectoryInitialView('call_sheet');
+              setActiveWorkspace('production');
+              setProductionSubView('cast_crew');
+            },
+            onOpenLocationMap: () => {
+              setActiveWorkspace('production');
+              setProductionSubView('location_map');
+            },
+            onOpenRevisionImpact: () => setIsRevisionImpactOpen(true),
+            onToggleFocusCenter: () => {
+              const bothCollapsed = isLeftPanelCollapsed && isRightPanelCollapsed;
+              setIsLeftPanelCollapsed(!bothCollapsed);
+              setIsRightPanelCollapsed(!bothCollapsed);
+            },
+            onOpenQuickNotes: () => {
+              setActiveWorkspace('authoring');
+              setIsQuickNotesOpen(true);
+            },
+          }}
+          onClose={() => setIsHelpGuideOpen(false)}
+        />
       )}
 
       {/* Import Fountain Dialog */}

@@ -14,7 +14,9 @@ import {
   LayoutGrid,
   Columns,
   X,
-  BookOpen
+  BookOpen,
+  PanelLeftClose,
+  PanelLeftOpen
 } from 'lucide-react';
 import { Scene, StoryCharacter, ActiveWorkspace, ScreenplayElement } from '../types/story';
 
@@ -53,6 +55,8 @@ interface OutlineColumnProps {
   characters: StoryCharacter[];
   activeWorkspace: ActiveWorkspace;
   elements?: ScreenplayElement[];
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 interface ThumbnailProps {
@@ -119,6 +123,11 @@ const ScenePageThumbnail: React.FC<ThumbnailProps> = ({ scene, elements = [], is
                   <div key={idx} className="mx-auto w-8/12 h-[1.5px] bg-gray-600 rounded-full" />
                 );
               }
+              if (el.type === 'VOICE_OVER') {
+                return (
+                  <div key={idx} className="mx-auto w-8/12 h-[1.5px] bg-violet-500 rounded-full" />
+                );
+              }
               if (el.type === 'PARENTHETICAL') {
                 return (
                   <div key={idx} className="mx-auto w-4/12 h-[1px] bg-gray-400 rounded-full" />
@@ -170,6 +179,8 @@ export const OutlineColumn: React.FC<OutlineColumnProps> = ({
   characters,
   activeWorkspace,
   elements = [],
+  isCollapsed = false,
+  onToggleCollapse,
 }) => {
   const [tab, setTab] = useState<'outline' | 'strip_properties' | 'cast'>(
     activeWorkspace === 'production' ? 'strip_properties' : 'outline'
@@ -245,39 +256,129 @@ export const OutlineColumn: React.FC<OutlineColumnProps> = ({
 
   const [outlineViewStyle, setOutlineViewStyle] = useState<'thumbnails' | 'grid' | 'compact'>('thumbnails');
 
+  if (isCollapsed) {
+    return (
+      <aside className="w-10 flex-shrink-0 bg-[#1b1b1b] border-r border-[#383838] flex flex-col items-center py-2.5 gap-2 h-full text-xs select-none">
+        {onToggleCollapse && (
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            title="Expand Left Outline Panel"
+            aria-label="Expand Left Outline Panel"
+            className="p-1.5 rounded bg-[#252525] hover:bg-[#333333] text-gray-300 hover:text-[#ff8000] border border-[#3a3a3a] transition-colors"
+          >
+            <PanelLeftOpen className="w-4 h-4" />
+          </button>
+        )}
+
+        <div className="w-5 h-px bg-[#323232] my-0.5" />
+
+        <button
+          type="button"
+          onClick={() => {
+            setTab('outline');
+            onToggleCollapse?.();
+          }}
+          title={`Outline (${scenes.length} scenes)`}
+          className={`p-1.5 rounded transition-colors ${
+            tab === 'outline'
+              ? 'bg-[#2a2219] text-[#ff8000] border border-[#ff8000]/40'
+              : 'text-gray-400 hover:text-gray-200 hover:bg-[#262626]'
+          }`}
+        >
+          <List className="w-4 h-4" />
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setTab('strip_properties');
+            onToggleCollapse?.();
+          }}
+          title="Strip Properties"
+          className={`p-1.5 rounded transition-colors ${
+            tab === 'strip_properties'
+              ? 'bg-[#2a2219] text-[#ff8000] border border-[#ff8000]/40'
+              : 'text-gray-400 hover:text-gray-200 hover:bg-[#262626]'
+          }`}
+        >
+          <Sliders className="w-4 h-4" />
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setTab('cast');
+            onToggleCollapse?.();
+          }}
+          title={`Cast (${characters.length})`}
+          className={`p-1.5 rounded transition-colors ${
+            tab === 'cast'
+              ? 'bg-[#2a2219] text-[#ff8000] border border-[#ff8000]/40'
+              : 'text-gray-400 hover:text-gray-200 hover:bg-[#262626]'
+          }`}
+        >
+          <Users className="w-4 h-4" />
+        </button>
+
+        <div className="mt-auto pb-2 text-[10px] font-semibold tracking-widest text-gray-500 [writing-mode:vertical-rl] rotate-180">
+          OUTLINE
+        </div>
+      </aside>
+    );
+  }
+
   return (
     <aside className="w-80 flex-shrink-0 bg-[#242424] border-r border-[#383838] flex flex-col h-full text-xs select-none">
+      {/* Panel Header with Collapse Button */}
+      <div className="px-3 py-1.5 bg-[#181818] border-b border-[#323232] flex items-center justify-between gap-2">
+        <span className="text-[11px] font-semibold text-gray-300 tracking-wide truncate">
+          Outline & Properties
+        </span>
+        {onToggleCollapse && (
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            title="Collapse Left Panel to Maximize Center Window"
+            aria-label="Collapse Left Outline Panel"
+            className="p-1 rounded text-gray-400 hover:text-[#ff8000] hover:bg-[#282828] transition-colors shrink-0"
+          >
+            <PanelLeftClose className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+
       {/* Column Tab Headers */}
-      <div className="flex border-b border-[#383838] bg-[#1c1c1c]">
+      <div className="grid grid-cols-3 border-b border-[#383838] bg-[#1c1c1c] text-[11px]">
         <button
           onClick={() => setTab('outline')}
-          className={`flex-1 py-2 text-center font-semibold tracking-wider transition-colors border-r border-[#333] ${
+          className={`py-2 px-1.5 text-center font-semibold tracking-wider transition-colors border-r border-[#333] whitespace-nowrap truncate ${
             tab === 'outline'
               ? 'bg-[#242424] text-[#ff8000] border-t-2 border-t-[#ff8000]'
               : 'text-gray-400 hover:text-gray-200 hover:bg-[#222]'
           }`}
         >
-          OUTLINE
+          Outline
         </button>
         <button
           onClick={() => setTab('strip_properties')}
-          className={`flex-1 py-2 text-center font-semibold tracking-wider transition-colors border-r border-[#333] ${
+          className={`py-2 px-1.5 text-center font-semibold tracking-wider transition-colors border-r border-[#333] whitespace-nowrap truncate ${
             tab === 'strip_properties'
               ? 'bg-[#242424] text-[#ff8000] border-t-2 border-t-[#ff8000]'
               : 'text-gray-400 hover:text-gray-200 hover:bg-[#222]'
           }`}
         >
-          STRIP PROPERTIES
+          Properties
         </button>
         <button
           onClick={() => setTab('cast')}
-          className={`flex-1 py-2 text-center font-semibold tracking-wider transition-colors ${
+          className={`py-2 px-1.5 text-center font-semibold tracking-wider transition-colors whitespace-nowrap truncate ${
             tab === 'cast'
               ? 'bg-[#242424] text-[#ff8000] border-t-2 border-t-[#ff8000]'
               : 'text-gray-400 hover:text-gray-200 hover:bg-[#222]'
           }`}
         >
-          CAST
+          Cast ({characters.length})
         </button>
       </div>
 
@@ -635,6 +736,19 @@ export const OutlineColumn: React.FC<OutlineColumnProps> = ({
                                   </div>
                                 );
                               }
+                              if (el.type === 'VOICE_OVER') {
+                                return (
+                                  <div
+                                    key={el.id}
+                                    className="px-4 text-violet-200 italic leading-relaxed border-l-2 border-violet-500/70 pl-2.5"
+                                  >
+                                    <span className="not-italic text-[9px] font-mono font-bold text-violet-300 mr-1.5">
+                                      [{el.character ? `${el.character} ` : ''}V.O.]
+                                    </span>
+                                    {el.text}
+                                  </div>
+                                );
+                              }
                               if (el.type === 'SHOT') {
                                 return (
                                   <div
@@ -797,6 +911,16 @@ export const OutlineColumn: React.FC<OutlineColumnProps> = ({
                   ) : (
                     selectedScene.characters.map((charName, i) => {
                       const color = charColorMap.get(charName.toUpperCase()) || '#4bcffa';
+                      const normChar = charName.trim().toUpperCase();
+                      const sceneEls = elements.filter((el) => el.sceneId === selectedScene.id);
+                      const hasVOInScene = sceneEls.some(
+                        (el) =>
+                          (el.type === 'VOICE_OVER' &&
+                            (el.character?.trim().toUpperCase() === normChar || !el.character)) ||
+                          (el.type === 'CHARACTER' &&
+                            el.text.replace(/\(.*?\)/g, '').trim().toUpperCase() === normChar &&
+                            /\((V\.?O\.?|VOICE\s*OVER)\)/i.test(el.text))
+                      );
                       return (
                         <div
                           key={i}
@@ -809,7 +933,13 @@ export const OutlineColumn: React.FC<OutlineColumnProps> = ({
                             />
                             <span className="font-medium text-xs text-gray-200">{charName}</span>
                           </div>
-                          <span className="text-[10px] text-emerald-400 font-mono">ON SET</span>
+                          <span
+                            className={`text-[10px] font-mono ${
+                              hasVOInScene ? 'text-violet-300' : 'text-emerald-400'
+                            }`}
+                          >
+                            {hasVOInScene ? 'ON SET / V.O.' : 'ON SET'}
+                          </span>
                         </div>
                       );
                     })

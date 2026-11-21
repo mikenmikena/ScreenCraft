@@ -1,5 +1,5 @@
 import React from 'react';
-import { Home, Mail, Settings, HelpCircle, LogOut, Maximize2, Film, Calendar, Terminal, Camera, BookOpen } from 'lucide-react';
+import { Home, Mail, Settings, HelpCircle, LogOut, Maximize2, Film, Calendar, Terminal, Camera, BookOpen, MonitorPlay } from 'lucide-react';
 import { ActiveWorkspace } from '../types/story';
 import { BrandIcon } from './BrandIcon';
 
@@ -7,6 +7,7 @@ interface TopHeaderProps {
   activeWorkspace: ActiveWorkspace;
   onSelectWorkspace: (workspace: ActiveWorkspace) => void;
   projectTitle: string;
+  onOpenTeleprompter?: () => void;
   unreadCount?: number;
   userName?: string;
 }
@@ -15,6 +16,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   activeWorkspace,
   onSelectWorkspace,
   projectTitle,
+  onOpenTeleprompter,
   unreadCount = 19,
   userName = 'Jeffrey (Online)',
 }) => {
@@ -117,6 +119,17 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
 
         {/* User, Notifications & System Controls */}
         <div className="flex items-center space-x-3 text-gray-300">
+          {onOpenTeleprompter && (
+            <button
+              onClick={onOpenTeleprompter}
+              className="flex items-center space-x-1.5 px-2.5 py-1 rounded bg-[#141414] hover:bg-black text-white border border-[#444] hover:border-[#ff7700] transition-colors whitespace-nowrap shrink-0"
+              title="Open Dedicated Teleprompter Window for Filming"
+            >
+              <MonitorPlay className="w-3.5 h-3.5 text-[#ff7700]" />
+              <span className="font-semibold">Teleprompter</span>
+            </button>
+          )}
+
           {/* User Online Status */}
           <div className="flex items-center space-x-1.5 text-xs text-gray-300 bg-[#292929] px-2.5 py-1 rounded border border-[#3a3a3a]">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>

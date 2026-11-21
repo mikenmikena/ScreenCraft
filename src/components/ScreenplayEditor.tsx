@@ -4,10 +4,18 @@ import {
   Scene,
   ElementType,
   StoryComment,
+  StoryCharacter,
   Tag,
   ScriptFormatMode,
   StoryboardFrame,
+  ScreenplayRevision,
+  SceneContinuityAlert,
 } from '../types/story';
+import {
+  buildLatestRevisionTimestampMap,
+  getElementRevisionInfo,
+  RevisionTier,
+} from '../utils/revisionPass';
 import {
   MessageSquare,
   Camera,
@@ -15,6 +23,9 @@ import {
   Columns,
   Image as ImageIcon,
   Plus,
+  Mic,
+  History,
+  ShieldAlert,
 } from 'lucide-react';
 
 interface ScreenplayEditorProps {
@@ -22,15 +33,23 @@ interface ScreenplayEditorProps {
   scenes: Scene[];
   comments: StoryComment[];
   tags: Tag[];
+  characters?: StoryCharacter[];
   storyboards?: StoryboardFrame[];
+  revisions?: ScreenplayRevision[];
+  isRevisionPassMode?: boolean;
+  continuityAlertsByElementId?: Record<string, SceneContinuityAlert[]>;
+  focusedElementId?: string | null;
+  onInspectContinuityElement?: (elementId: string) => void;
   scriptFormat?: ScriptFormatMode;
   onChangeScriptFormat?: (format: ScriptFormatMode) => void;
   onAddStoryboardImageForScene?: (sceneId: string, imageUrl: string, description: string) => void;
   onUpdateElement: (id: string, text: string) => void;
   onUpdateElementType: (id: string, type: ElementType) => void;
+  onUpdateElementCharacter?: (id: string, character: string) => void;
   onAddElementAfter: (afterId: string, type: ElementType, text?: string) => void;
   onDeleteElement: (id: string) => void;
   onSelectScene: (sceneId: string) => void;
+  onFocusElement?: (element: ScreenplayElement) => void;
   onOpenComment: (commentId: string) => void;
   onAddCommentForElement: (elementId: string) => void;
   zoomLevel: number;
@@ -47,25 +66,84 @@ interface AVCueRow {
   storyboardFrame?: StoryboardFrame;
 }
 
+const getPaperRevisionClasses = (tier: RevisionTier) => {
+  switch (tier) {
+    case 'today':
+      return {
+        wrapper: 'bg-red-100/85 ring-1 ring-red-400/85 rounded px-2 -mx-2',
+        text: 'text-red-900',
+        label: 'text-red-700',
+      };
+    case 'this_week':
+      return {
+        wrapper: 'bg-amber-100/85 ring-1 ring-amber-400/85 rounded px-2 -mx-2',
+        text: 'text-amber-900',
+        label: 'text-amber-800',
+      };
+    case 'older':
+    default:
+      return {
+        wrapper: 'bg-stone-200/65 ring-1 ring-stone-300/90 rounded px-2 -mx-2',
+        text: 'text-gray-500',
+        label: 'text-gray-500',
+      };
+  }
+};
+
+const getAVRevisionClasses = (tier: RevisionTier) => {
+  switch (tier) {
+    case 'today':
+      return 'bg-red-950/45 border-red-500/80 text-red-100';
+    case 'this_week':
+      return 'bg-amber-950/40 border-amber-400/80 text-amber-100';
+    case 'older':
+    default:
+      return 'bg-neutral-800/65 border-neutral-600/70 text-gray-400';
+  }
+};
+
 export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
   elements,
   scenes,
   comments,
+  characters = [],
   storyboards = [],
+  revisions = [],
+  isRevisionPassMode = false,
+  continuityAlertsByElementId = {},
+  focusedElementId = null,
+  onInspectContinuityElement,
   scriptFormat = 'single_column_film',
   onChangeScriptFormat,
   onAddStoryboardImageForScene,
   onUpdateElement,
   onUpdateElementType,
+  onUpdateElementCharacter,
   onAddElementAfter,
   onDeleteElement,
   onSelectScene,
+  onFocusElement,
   onOpenComment,
   onAddCommentForElement,
   zoomLevel,
 }) => {
   const [activeElementId, setActiveElementId] = useState<string | null>(null);
   const [hoveredElementId, setHoveredElementId] = useState<string | null>(null);
+  const elementDomRefs = React.useRef<Map<string, HTMLElement>>(new Map());
+
+  React.useEffect(() => {
+    if (!focusedElementId) return;
+    setActiveElementId(focusedElementId);
+    const node = elementDomRefs.current.get(focusedElementId);
+    if (node) {
+      node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [focusedElementId]);
+
+  const revisionTimestampMap = useMemo(
+    () => buildLatestRevisionTimestampMap(revisions),
+    [revisions]
+  );
 
   const sceneMap = useMemo(() => {
     const map = new Map<string, Scene>();
@@ -136,7 +214,12 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
         return;
       }
 
-      if (el.type === 'CHARACTER' || el.type === 'PARENTHETICAL' || el.type === 'DIALOGUE') {
+      if (
+        el.type === 'CHARACTER' ||
+        el.type === 'PARENTHETICAL' ||
+        el.type === 'DIALOGUE' ||
+        el.type === 'VOICE_OVER'
+      ) {
         currentRow.audioElements.push(el);
       } else {
         // Start a fresh visual+audio beat if current row already has audio dialogue
@@ -186,20 +269,30 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
 
   const handleKeyDown = (
     e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>,
-    element: ScreenplayElement
+    element: ScreenplayElement,
+    index: number
   ) => {
     if (e.key === 'Enter') {
       e.preventDefault();
       if (element.type === 'CHARACTER') {
-        onAddElementAfter(element.id, 'DIALOGUE');
+        const isVOCue = /\((V\.?O\.?|VOICE\s*OVER)\)/i.test(element.text);
+        onAddElementAfter(element.id, isVOCue ? 'VOICE_OVER' : 'DIALOGUE');
       } else if (element.type === 'DIALOGUE') {
         if (!element.text.trim()) {
           onUpdateElementType(element.id, 'ACTION');
         } else {
           onAddElementAfter(element.id, 'CHARACTER');
         }
+      } else if (element.type === 'VOICE_OVER') {
+        if (!element.text.trim()) {
+          onUpdateElementType(element.id, 'ACTION');
+        } else {
+          onAddElementAfter(element.id, 'CHARACTER');
+        }
       } else if (element.type === 'PARENTHETICAL') {
-        onAddElementAfter(element.id, 'DIALOGUE');
+        const prevEl = index > 0 ? elements[index - 1] : undefined;
+        const isVOCue = prevEl?.type === 'CHARACTER' && /\((V\.?O\.?|VOICE\s*OVER)\)/i.test(prevEl.text);
+        onAddElementAfter(element.id, isVOCue ? 'VOICE_OVER' : 'DIALOGUE');
       } else if (element.type === 'SCENE_HEADING') {
         onAddElementAfter(element.id, 'ACTION');
       } else {
@@ -208,7 +301,11 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
     } else if (e.key === 'Tab') {
       e.preventDefault();
       if (element.type === 'DIALOGUE') {
+        onUpdateElementType(element.id, 'VOICE_OVER');
+      } else if (element.type === 'VOICE_OVER') {
         onUpdateElementType(element.id, 'PARENTHETICAL');
+      } else if (element.type === 'PARENTHETICAL') {
+        onUpdateElementType(element.id, 'DIALOGUE');
       } else if (element.type === 'ACTION') {
         onUpdateElementType(element.id, 'CHARACTER');
       } else if (element.type === 'CHARACTER') {
@@ -218,6 +315,19 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
       e.preventDefault();
       onDeleteElement(element.id);
     }
+  };
+
+  const resolvePrecedingSpeaker = (index: number): string | undefined => {
+    for (let i = index - 1; i >= 0; i--) {
+      const prev = elements[i];
+      if (prev.type === 'CHARACTER') {
+        return prev.text.replace(/\(.*?\)/g, '').trim().toUpperCase() || undefined;
+      }
+      if (prev.type === 'SCENE_HEADING' || prev.type === 'ACTION' || prev.type === 'TRANSITION' || prev.type === 'SHOT') {
+        break;
+      }
+    }
+    return undefined;
   };
 
   return (
@@ -318,32 +428,79 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
                       )}
 
                       <div className="space-y-1.5">
-                        {row.visualElements.map((el) => (
-                          <textarea
-                            key={el.id}
-                            rows={Math.max(1, Math.ceil(el.text.length / 42))}
-                            value={el.text}
-                            onChange={(e) =>
-                              onUpdateElement(
-                                el.id,
-                                el.type === 'SCENE_HEADING' || el.type === 'SHOT'
-                                  ? e.target.value.toUpperCase()
-                                  : e.target.value
-                              )
-                            }
-                            onFocus={() => {
-                              setActiveElementId(el.id);
-                              onSelectScene(row.sceneId);
-                            }}
-                            className={`w-full bg-[#171717] border rounded p-2 text-xs leading-relaxed resize-none focus:outline-none focus:border-[#ff8000] ${
-                              el.type === 'SCENE_HEADING'
-                                ? 'font-bold text-amber-300 border-[#3f3528]'
-                                : el.type === 'SHOT'
-                                ? 'font-semibold text-cyan-300 border-[#283c44]'
-                                : 'text-gray-200 border-[#333333]'
-                            }`}
-                          />
-                        ))}
+                        {row.visualElements.map((el) => {
+                          const revInfo = isRevisionPassMode
+                            ? getElementRevisionInfo(el, revisionTimestampMap)
+                            : null;
+                          const elContinuityAlerts = continuityAlertsByElementId[el.id] || [];
+                          return (
+                            <div
+                              key={el.id}
+                              ref={(node) => {
+                                if (node) elementDomRefs.current.set(el.id, node);
+                                else elementDomRefs.current.delete(el.id);
+                              }}
+                              className="space-y-0.5"
+                            >
+                              {revInfo && (
+                                <div className="flex items-center justify-between text-[10px] font-mono text-gray-300 px-1">
+                                  <span>{revInfo.label}</span>
+                                  <span className="text-gray-400">{revInfo.shortDateLabel}</span>
+                                </div>
+                              )}
+                              {elContinuityAlerts.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onInspectContinuityElement?.(el.id);
+                                  }}
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-950/75 border border-rose-500/70 text-[10px] font-sans text-rose-200 hover:bg-rose-900/75 whitespace-nowrap"
+                                  title={elContinuityAlerts[0].explanation}
+                                >
+                                  <ShieldAlert className="w-3 h-3 text-rose-400 shrink-0" />
+                                  <span>
+                                    Continuity ({elContinuityAlerts.length}): {elContinuityAlerts[0].itemName}
+                                  </span>
+                                </button>
+                              )}
+                              <textarea
+                                rows={Math.max(1, Math.ceil(el.text.length / 42))}
+                                value={el.text}
+                                onChange={(e) =>
+                                  onUpdateElement(
+                                    el.id,
+                                    el.type === 'SCENE_HEADING' || el.type === 'SHOT'
+                                      ? e.target.value.toUpperCase()
+                                      : e.target.value
+                                  )
+                                }
+                                onFocus={() => {
+                                  setActiveElementId(el.id);
+                                  onSelectScene(row.sceneId);
+                                }}
+                                title={
+                                  revInfo
+                                    ? `Last edited: ${revInfo.label} (${revInfo.shortDateLabel})`
+                                    : undefined
+                                }
+                                className={`w-full border rounded p-2 text-xs leading-relaxed resize-none focus:outline-none focus:border-[#ff8000] ${
+                                  revInfo
+                                    ? `${getAVRevisionClasses(revInfo.tier)} ${
+                                        el.type === 'SCENE_HEADING' || el.type === 'SHOT'
+                                          ? 'font-bold'
+                                          : ''
+                                      }`
+                                    : el.type === 'SCENE_HEADING'
+                                    ? 'bg-[#171717] font-bold text-amber-300 border-[#3f3528]'
+                                    : el.type === 'SHOT'
+                                    ? 'bg-[#171717] font-semibold text-cyan-300 border-[#283c44]'
+                                    : 'bg-[#171717] text-gray-200 border-[#333333]'
+                                }`}
+                              />
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
 
@@ -370,37 +527,100 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
                           )}
                         </div>
                       ) : (
-                        row.audioElements.map((el) => (
-                          <div key={el.id}>
-                            {el.type === 'CHARACTER' ? (
-                              <input
-                                type="text"
-                                value={el.text}
-                                onChange={(e) =>
-                                  onUpdateElement(el.id, e.target.value.toUpperCase())
-                                }
-                                onFocus={() => setActiveElementId(el.id)}
-                                className="w-full bg-transparent font-bold text-amber-300 uppercase text-xs px-1 py-0.5 focus:outline-none focus:bg-[#171717] rounded"
-                              />
-                            ) : el.type === 'PARENTHETICAL' ? (
-                              <input
-                                type="text"
-                                value={el.text}
-                                onChange={(e) => onUpdateElement(el.id, e.target.value)}
-                                onFocus={() => setActiveElementId(el.id)}
-                                className="w-full bg-transparent italic text-gray-400 text-[11px] px-1 py-0.5 focus:outline-none focus:bg-[#171717] rounded"
-                              />
-                            ) : (
-                              <textarea
-                                rows={Math.max(1, Math.ceil(el.text.length / 42))}
-                                value={el.text}
-                                onChange={(e) => onUpdateElement(el.id, e.target.value)}
-                                onFocus={() => setActiveElementId(el.id)}
-                                className="w-full bg-[#171717] border border-[#333333] rounded p-2 text-xs text-gray-100 leading-relaxed resize-none focus:outline-none focus:border-[#ff8000]"
-                              />
-                            )}
-                          </div>
-                        ))
+                        row.audioElements.map((el) => {
+                          const revInfo = isRevisionPassMode
+                            ? getElementRevisionInfo(el, revisionTimestampMap)
+                            : null;
+                          const avRevBox = revInfo ? getAVRevisionClasses(revInfo.tier) : '';
+                          return (
+                            <div
+                              key={el.id}
+                              title={
+                                revInfo
+                                  ? `Last edited: ${revInfo.label} (${revInfo.shortDateLabel})`
+                                  : undefined
+                              }
+                            >
+                              {el.type === 'CHARACTER' ? (
+                                <input
+                                  type="text"
+                                  value={el.text}
+                                  onChange={(e) =>
+                                    onUpdateElement(el.id, e.target.value.toUpperCase())
+                                  }
+                                  onFocus={() => {
+                                    setActiveElementId(el.id);
+                                    onFocusElement?.(el);
+                                  }}
+                                  className={`w-full font-bold uppercase text-xs px-1.5 py-0.5 focus:outline-none rounded border ${
+                                    revInfo
+                                      ? avRevBox
+                                      : 'bg-transparent border-transparent text-amber-300 focus:bg-[#171717]'
+                                  }`}
+                                />
+                              ) : el.type === 'PARENTHETICAL' ? (
+                                <input
+                                  type="text"
+                                  value={el.text}
+                                  onChange={(e) => onUpdateElement(el.id, e.target.value)}
+                                  onFocus={() => {
+                                    setActiveElementId(el.id);
+                                    onFocusElement?.(el);
+                                  }}
+                                  className={`w-full italic text-[11px] px-1.5 py-0.5 focus:outline-none rounded border ${
+                                    revInfo
+                                      ? avRevBox
+                                      : 'bg-transparent border-transparent text-gray-400 focus:bg-[#171717]'
+                                  }`}
+                                />
+                              ) : el.type === 'VOICE_OVER' ? (
+                                <div className="space-y-1">
+                                  <div className="flex items-center justify-between gap-2 px-1">
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-xs bg-violet-950/70 border border-violet-600/50 text-violet-300 font-mono text-[10px] font-semibold">
+                                      <Mic className="w-2.5 h-2.5" />
+                                      <span>VOICE-OVER (V.O.)</span>
+                                    </span>
+                                    {el.character && (
+                                      <span className="text-[10px] font-mono text-violet-300/90">
+                                        {el.character}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <textarea
+                                    rows={Math.max(1, Math.ceil(el.text.length / 42))}
+                                    value={el.text}
+                                    placeholder="Enter voice-over narration or internal monologue..."
+                                    onChange={(e) => onUpdateElement(el.id, e.target.value)}
+                                    onFocus={() => {
+                                      setActiveElementId(el.id);
+                                      onFocusElement?.(el);
+                                    }}
+                                    className={`w-full border rounded p-2 text-xs italic leading-relaxed resize-none focus:outline-none focus:border-violet-400 ${
+                                      revInfo
+                                        ? avRevBox
+                                        : 'bg-[#191624] border-violet-700/50 text-violet-100'
+                                    }`}
+                                  />
+                                </div>
+                              ) : (
+                                <textarea
+                                  rows={Math.max(1, Math.ceil(el.text.length / 42))}
+                                  value={el.text}
+                                  onChange={(e) => onUpdateElement(el.id, e.target.value)}
+                                  onFocus={() => {
+                                    setActiveElementId(el.id);
+                                    onFocusElement?.(el);
+                                  }}
+                                  className={`w-full border rounded p-2 text-xs leading-relaxed resize-none focus:outline-none focus:border-[#ff8000] ${
+                                    revInfo
+                                      ? avRevBox
+                                      : 'bg-[#171717] border-[#333333] text-gray-100'
+                                  }`}
+                                />
+                              )}
+                            </div>
+                          );
+                        })
                       )}
                     </div>
                   </div>
@@ -412,10 +632,18 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
           /* Mode A: Screenplay Paper (Single-Column 12pt Courier) */
           <div className="bg-[#fbf9f4] text-black font-courier text-[13px] leading-[1.3] px-16 py-16 rounded shadow-2xl min-h-[1150px] relative border border-[#e4ded0]">
             {/* Header Strip */}
-            <div className="flex items-center justify-between pb-6 border-b border-gray-300/60 mb-8 font-sans">
-              <span className="text-[11px] uppercase tracking-widest text-gray-500 font-semibold">
-                SCREENCRAFT SCREENPLAY MASTER • INDUSTRY STANDARD 12PT COURIER
-              </span>
+            <div className="flex items-center justify-between pb-6 border-b border-gray-300/60 mb-8 font-sans gap-4">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="text-[11px] uppercase tracking-widest text-gray-500 font-semibold">
+                  SCREENCRAFT SCREENPLAY MASTER • INDUSTRY STANDARD 12PT COURIER
+                </span>
+                {isRevisionPassMode && (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-red-800 whitespace-nowrap">
+                    <History className="w-3 h-3" />
+                    <span>Revision Pass Active</span>
+                  </span>
+                )}
+              </div>
               {onChangeScriptFormat && (
                 <button
                   onClick={() => onChangeScriptFormat('av_multi_column')}
@@ -429,31 +657,96 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
 
             {/* Script Elements Flow */}
             <div className="space-y-3">
-              {elements.map((element) => {
+              {elements.map((element, idx) => {
                 const elementComments = commentMap.get(element.id) || [];
                 const scene = element.sceneId ? sceneMap.get(element.sceneId) : undefined;
                 const isSceneHeading = element.type === 'SCENE_HEADING';
                 const isCharacter = element.type === 'CHARACTER';
                 const isDialogue = element.type === 'DIALOGUE';
+                const isVoiceOver = element.type === 'VOICE_OVER';
                 const isParenthetical = element.type === 'PARENTHETICAL';
                 const isTransition = element.type === 'TRANSITION';
                 const isShot = element.type === 'SHOT';
                 const isActive = activeElementId === element.id;
+                const inferredSpeaker = isVoiceOver
+                  ? element.character || resolvePrecedingSpeaker(idx) || 'NARRATOR'
+                  : undefined;
+
+                const revInfo = isRevisionPassMode
+                  ? getElementRevisionInfo(element, revisionTimestampMap)
+                  : null;
+                const paperRev = revInfo ? getPaperRevisionClasses(revInfo.tier) : null;
+                const elContinuityAlerts = continuityAlertsByElementId[element.id] || [];
 
                 return (
                   <div
                     key={element.id}
+                    ref={(node) => {
+                      if (node) elementDomRefs.current.set(element.id, node);
+                      else elementDomRefs.current.delete(element.id);
+                    }}
                     onMouseEnter={() => setHoveredElementId(element.id)}
                     onMouseLeave={() => setHoveredElementId(null)}
+                    title={
+                      revInfo
+                        ? `Revision Pass: ${revInfo.label} (${revInfo.shortDateLabel})`
+                        : elContinuityAlerts.length > 0
+                        ? elContinuityAlerts[0].explanation
+                        : undefined
+                    }
                     className={`relative group transition-colors ${
-                      isActive ? 'bg-amber-50/40 rounded' : ''
+                      paperRev
+                        ? paperRev.wrapper
+                        : elContinuityAlerts.length > 0
+                        ? 'bg-rose-50/70 ring-1 ring-rose-300/90 rounded px-2 -mx-2'
+                        : isActive
+                        ? 'bg-amber-50/40 rounded'
+                        : ''
                     }`}
                   >
-                    {/* Left Gutter Action Controls & Shot Markers */}
+                    {revInfo && paperRev && (
+                      <div
+                        className={`pointer-events-none flex justify-end pt-0.5 font-sans text-[10px] font-semibold tracking-tight tabular-nums ${paperRev.label}`}
+                      >
+                        <span>
+                          {revInfo.label} · {revInfo.shortDateLabel}
+                        </span>
+                      </div>
+                    )}
+                    {elContinuityAlerts.length > 0 && (
+                      <div className="flex justify-end pt-1 font-sans">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onInspectContinuityElement?.(element.id);
+                          }}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-rose-100 hover:bg-rose-200 border border-rose-300 text-[10px] font-semibold text-rose-900 whitespace-nowrap transition-colors"
+                          title={elContinuityAlerts.map((a) => a.explanation).join(' | ')}
+                        >
+                          <ShieldAlert className="w-3 h-3 text-rose-700 shrink-0" />
+                          <span>
+                            Continuity {elContinuityAlerts[0].severity === 'conflict' ? 'Conflict' : 'Warning'} · {elContinuityAlerts[0].itemName}
+                            {elContinuityAlerts.length > 1 ? ` (+${elContinuityAlerts.length - 1})` : ''}
+                          </span>
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Left Gutter Action Controls & Shot / V.O. Markers */}
                     {isShot && (
                       <div className="absolute -left-14 top-0 flex items-center space-x-1 text-gray-700 font-mono text-[11px] select-none font-bold">
                         <Camera className="w-3.5 h-3.5 text-blue-600" />
                         <span>{element.shotNumber || '1'}.</span>
+                      </div>
+                    )}
+                    {isVoiceOver && (
+                      <div
+                        title="Voice-over (V.O.) narration or internal monologue"
+                        className="absolute -left-14 top-1 flex items-center gap-1 px-1.5 py-0.5 rounded-xs bg-violet-100 border border-violet-300 text-violet-800 font-mono text-[10px] font-bold select-none"
+                      >
+                        <Mic className="w-2.5 h-2.5" />
+                        <span>V.O.</span>
                       </div>
                     )}
 
@@ -467,12 +760,15 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
                           type="text"
                           value={element.text}
                           onChange={(e) => onUpdateElement(element.id, e.target.value.toUpperCase())}
-                          onKeyDown={(e) => handleKeyDown(e, element)}
+                          onKeyDown={(e) => handleKeyDown(e, element, idx)}
                           onFocus={() => {
                             setActiveElementId(element.id);
+                            onFocusElement?.(element);
                             if (scene) onSelectScene(scene.id);
                           }}
-                          className="font-bold text-black tracking-wider uppercase w-full bg-transparent border-b border-transparent focus:border-amber-500 focus:outline-none"
+                          className={`font-bold tracking-wider uppercase w-full bg-transparent border-b border-transparent focus:border-amber-500 focus:outline-none ${
+                            paperRev ? paperRev.text : 'text-black'
+                          }`}
                         />
                         <span className="font-mono text-blue-600 font-medium text-xs ml-4 flex-shrink-0 select-none tabular-nums">
                           {scene ? scene.timecode : '00:00:00'}
@@ -484,9 +780,14 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
                           type="text"
                           value={element.text}
                           onChange={(e) => onUpdateElement(element.id, e.target.value.toUpperCase())}
-                          onKeyDown={(e) => handleKeyDown(e, element)}
-                          onFocus={() => setActiveElementId(element.id)}
-                          className="font-bold text-black uppercase text-center w-80 bg-transparent border-b border-transparent focus:border-amber-500 focus:outline-none"
+                          onKeyDown={(e) => handleKeyDown(e, element, idx)}
+                          onFocus={() => {
+                            setActiveElementId(element.id);
+                            onFocusElement?.(element);
+                          }}
+                          className={`font-bold uppercase text-center w-80 bg-transparent border-b border-transparent focus:border-amber-500 focus:outline-none ${
+                            paperRev ? paperRev.text : 'text-black'
+                          }`}
                         />
                       </div>
                     ) : isParenthetical ? (
@@ -495,10 +796,55 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
                           type="text"
                           value={element.text}
                           onChange={(e) => onUpdateElement(element.id, e.target.value)}
-                          onKeyDown={(e) => handleKeyDown(e, element)}
-                          onFocus={() => setActiveElementId(element.id)}
-                          className="text-gray-800 italic text-center w-80 bg-transparent border-b border-transparent focus:border-amber-500 focus:outline-none"
+                          onKeyDown={(e) => handleKeyDown(e, element, idx)}
+                          onFocus={() => {
+                            setActiveElementId(element.id);
+                            onFocusElement?.(element);
+                          }}
+                          className={`italic text-center w-80 bg-transparent border-b border-transparent focus:border-amber-500 focus:outline-none ${
+                            paperRev ? paperRev.text : 'text-gray-800'
+                          }`}
                         />
+                      </div>
+                    ) : isVoiceOver ? (
+                      <div className="flex flex-col items-center py-1">
+                        <div className="w-[420px] border-l-2 border-violet-500/80 pl-3 py-0.5 bg-violet-50/40 rounded-r">
+                          <div className="flex items-center justify-between gap-2 mb-0.5 font-sans">
+                            <span className="text-[10px] font-mono font-bold tracking-wide text-violet-800 uppercase">
+                              {inferredSpeaker} (V.O.)
+                            </span>
+                            {(isActive || !resolvePrecedingSpeaker(idx)) && onUpdateElementCharacter && (
+                              <select
+                                value={element.character || resolvePrecedingSpeaker(idx) || ''}
+                                onChange={(e) => onUpdateElementCharacter(element.id, e.target.value)}
+                                title="Assign Voice-over (V.O.) speaker for Character Breakdown & Stripboard"
+                                className="text-[10px] font-sans bg-white/90 text-violet-900 border border-violet-300 rounded px-1.5 py-0.5 focus:outline-none focus:border-violet-600 cursor-pointer"
+                              >
+                                <option value="">Auto ({resolvePrecedingSpeaker(idx) || 'NARRATOR'})</option>
+                                {characters.map((c) => (
+                                  <option key={c.name} value={c.name}>
+                                    {c.name}
+                                  </option>
+                                ))}
+                                <option value="NARRATOR">NARRATOR</option>
+                              </select>
+                            )}
+                          </div>
+                          <textarea
+                            rows={Math.max(1, Math.ceil(element.text.length / 38))}
+                            value={element.text}
+                            placeholder="Voice-over narration or internal monologue..."
+                            onChange={(e) => onUpdateElement(element.id, e.target.value)}
+                            onKeyDown={(e) => handleKeyDown(e, element, idx)}
+                            onFocus={() => {
+                              setActiveElementId(element.id);
+                              onFocusElement?.(element);
+                            }}
+                            className={`italic text-left w-full bg-transparent resize-none leading-relaxed border-b border-transparent focus:border-violet-500 focus:outline-none ${
+                              paperRev ? paperRev.text : 'text-gray-900'
+                            }`}
+                          />
+                        </div>
                       </div>
                     ) : isDialogue ? (
                       <div className="flex justify-center py-0.5">
@@ -506,9 +852,14 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
                           rows={Math.max(1, Math.ceil(element.text.length / 38))}
                           value={element.text}
                           onChange={(e) => onUpdateElement(element.id, e.target.value)}
-                          onKeyDown={(e) => handleKeyDown(e, element)}
-                          onFocus={() => setActiveElementId(element.id)}
-                          className="text-black text-left w-[420px] bg-transparent resize-none leading-relaxed border-b border-transparent focus:border-amber-500 focus:outline-none"
+                          onKeyDown={(e) => handleKeyDown(e, element, idx)}
+                          onFocus={() => {
+                            setActiveElementId(element.id);
+                            onFocusElement?.(element);
+                          }}
+                          className={`text-left w-[420px] bg-transparent resize-none leading-relaxed border-b border-transparent focus:border-amber-500 focus:outline-none ${
+                            paperRev ? paperRev.text : 'text-black'
+                          }`}
                         />
                       </div>
                     ) : isTransition ? (
@@ -517,9 +868,14 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
                           type="text"
                           value={element.text}
                           onChange={(e) => onUpdateElement(element.id, e.target.value.toUpperCase())}
-                          onKeyDown={(e) => handleKeyDown(e, element)}
-                          onFocus={() => setActiveElementId(element.id)}
-                          className="font-bold text-black uppercase text-right w-64 bg-transparent border-b border-transparent focus:border-amber-500 focus:outline-none"
+                          onKeyDown={(e) => handleKeyDown(e, element, idx)}
+                          onFocus={() => {
+                            setActiveElementId(element.id);
+                            onFocusElement?.(element);
+                          }}
+                          className={`font-bold uppercase text-right w-64 bg-transparent border-b border-transparent focus:border-amber-500 focus:outline-none ${
+                            paperRev ? paperRev.text : 'text-black'
+                          }`}
                         />
                       </div>
                     ) : isShot ? (
@@ -528,9 +884,14 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
                           type="text"
                           value={element.text}
                           onChange={(e) => onUpdateElement(element.id, e.target.value.toUpperCase())}
-                          onKeyDown={(e) => handleKeyDown(e, element)}
-                          onFocus={() => setActiveElementId(element.id)}
-                          className="font-bold text-gray-800 tracking-wide uppercase w-full bg-transparent border-b border-transparent focus:border-amber-500 focus:outline-none"
+                          onKeyDown={(e) => handleKeyDown(e, element, idx)}
+                          onFocus={() => {
+                            setActiveElementId(element.id);
+                            onFocusElement?.(element);
+                          }}
+                          className={`font-bold tracking-wide uppercase w-full bg-transparent border-b border-transparent focus:border-amber-500 focus:outline-none ${
+                            paperRev ? paperRev.text : 'text-gray-800'
+                          }`}
                         />
                       </div>
                     ) : (
@@ -539,9 +900,14 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
                           rows={Math.max(1, Math.ceil(element.text.length / 65))}
                           value={element.text}
                           onChange={(e) => onUpdateElement(element.id, e.target.value)}
-                          onKeyDown={(e) => handleKeyDown(e, element)}
-                          onFocus={() => setActiveElementId(element.id)}
-                          className="text-black text-left w-full bg-transparent resize-none leading-relaxed border-b border-transparent focus:border-amber-500 focus:outline-none"
+                          onKeyDown={(e) => handleKeyDown(e, element, idx)}
+                          onFocus={() => {
+                            setActiveElementId(element.id);
+                            onFocusElement?.(element);
+                          }}
+                          className={`text-left w-full bg-transparent resize-none leading-relaxed border-b border-transparent focus:border-amber-500 focus:outline-none ${
+                            paperRev ? paperRev.text : 'text-black'
+                          }`}
                         />
                       </div>
                     )}
@@ -585,31 +951,37 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
             </div>
 
             {/* Quick Insert Element Button at Bottom of Page */}
-            <div className="mt-12 pt-6 border-t border-gray-300 flex items-center justify-center space-x-2 font-sans select-none">
+            <div className="mt-12 pt-6 border-t border-gray-300 flex flex-wrap items-center justify-center gap-2 font-sans select-none">
               <span className="text-xs text-gray-500">Insert element:</span>
               <button
-                onClick={() => onAddElementAfter(elements[elements.length - 1].id, 'SCENE_HEADING')}
+                onClick={() => onAddElementAfter(elements[elements.length - 1]?.id || 'root', 'SCENE_HEADING')}
                 className="px-2.5 py-1 bg-[#eae6dc] hover:bg-amber-100 text-gray-800 rounded text-xs font-semibold border border-gray-300 transition-colors"
               >
                 + Scene Heading
               </button>
               <button
-                onClick={() => onAddElementAfter(elements[elements.length - 1].id, 'ACTION')}
+                onClick={() => onAddElementAfter(elements[elements.length - 1]?.id || 'root', 'ACTION')}
                 className="px-2.5 py-1 bg-[#eae6dc] hover:bg-amber-100 text-gray-800 rounded text-xs font-semibold border border-gray-300 transition-colors"
               >
                 + Action
               </button>
               <button
-                onClick={() => onAddElementAfter(elements[elements.length - 1].id, 'CHARACTER')}
+                onClick={() => onAddElementAfter(elements[elements.length - 1]?.id || 'root', 'CHARACTER')}
                 className="px-2.5 py-1 bg-[#eae6dc] hover:bg-amber-100 text-gray-800 rounded text-xs font-semibold border border-gray-300 transition-colors"
               >
                 + Character
               </button>
               <button
-                onClick={() => onAddElementAfter(elements[elements.length - 1].id, 'DIALOGUE')}
+                onClick={() => onAddElementAfter(elements[elements.length - 1]?.id || 'root', 'DIALOGUE')}
                 className="px-2.5 py-1 bg-[#eae6dc] hover:bg-amber-100 text-gray-800 rounded text-xs font-semibold border border-gray-300 transition-colors"
               >
                 + Dialogue
+              </button>
+              <button
+                onClick={() => onAddElementAfter(elements[elements.length - 1]?.id || 'root', 'VOICE_OVER')}
+                className="px-2.5 py-1 bg-violet-100 hover:bg-violet-200 text-violet-900 rounded text-xs font-semibold border border-violet-300 transition-colors"
+              >
+                + Voice-over (V.O.)
               </button>
             </div>
           </div>

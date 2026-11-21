@@ -26,7 +26,10 @@ import {
   Bookmark,
   Sparkles,
   Filter,
-  Check
+  Check,
+  ShieldAlert,
+  PanelRightClose,
+  PanelRightOpen
 } from 'lucide-react';
 import {
   Scene,
@@ -38,6 +41,8 @@ import {
   ScreenplayRevision,
   RevisionChangeType
 } from '../types/story';
+import { SceneContinuityReport } from '../utils/sceneContinuityCheck';
+import { SceneContinuityPanel } from './SceneContinuityPanel';
 
 interface InspectorColumnProps {
   selectedScene: Scene | undefined;
@@ -58,6 +63,17 @@ interface InspectorColumnProps {
   onAddStoryboardFrame?: (sceneId: string) => void;
   onRevertRevision?: (revision: ScreenplayRevision) => void;
   onCreateDraftMilestone?: (name: string, color: string) => void;
+  continuityReport?: SceneContinuityReport;
+  onJumpToOccurrence?: (sceneId: string, elementId?: string) => void;
+  onAcknowledgeContinuity?: (alertId: string) => void;
+  onRestoreContinuity?: (alertId: string) => void;
+  onOpenContinuityModal?: () => void;
+  requestedTab?: {
+    tab: 'comments' | 'tags' | 'properties' | 'shots' | 'history' | 'continuity';
+    nonce: number;
+  } | null;
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 export const InspectorColumn: React.FC<InspectorColumnProps> = ({
@@ -79,8 +95,22 @@ export const InspectorColumn: React.FC<InspectorColumnProps> = ({
   onAddStoryboardFrame,
   onRevertRevision,
   onCreateDraftMilestone,
+  continuityReport,
+  onJumpToOccurrence,
+  onAcknowledgeContinuity,
+  onRestoreContinuity,
+  onOpenContinuityModal,
+  requestedTab,
+  isCollapsed = false,
+  onToggleCollapse,
 }) => {
-  const [activeTab, setActiveTab] = useState<'comments' | 'tags' | 'properties' | 'shots' | 'history'>('history');
+  const [activeTab, setActiveTab] = useState<'comments' | 'tags' | 'properties' | 'shots' | 'history' | 'continuity'>('history');
+
+  React.useEffect(() => {
+    if (requestedTab?.tab) {
+      setActiveTab(requestedTab.tab);
+    }
+  }, [requestedTab]);
   const [historyScope, setHistoryScope] = useState<'scene' | 'project'>('scene');
   const [historySearch, setHistorySearch] = useState('');
   const [historyTypeFilter, setHistoryTypeFilter] = useState<string>('all');
@@ -188,61 +218,181 @@ export const InspectorColumn: React.FC<InspectorColumnProps> = ({
     { name: 'Cherry (8th Rev)', color: '#ef4444' },
   ];
 
+  const openCommentsCount = comments.filter((c) => !c.resolved).length;
+  const activeContinuityCount = continuityReport ? continuityReport.summary.totalActive : 0;
+
+  if (isCollapsed) {
+    const railItems: {
+      id: 'properties' | 'comments' | 'tags' | 'shots' | 'history' | 'continuity';
+      label: string;
+      icon: React.ReactNode;
+      hasAlert?: boolean;
+    }[] = [
+      { id: 'properties', label: 'Scene Properties', icon: <Sliders className="w-4 h-4" /> },
+      { id: 'comments', label: `Comments (${openCommentsCount})`, icon: <MessageSquare className="w-4 h-4" /> },
+      { id: 'tags', label: `Tags (${tags.length})`, icon: <TagIcon className="w-4 h-4" /> },
+      { id: 'shots', label: `Shots (${sceneShots.length})`, icon: <Camera className="w-4 h-4" /> },
+      { id: 'history', label: `History (${scopedRevisions.length})`, icon: <History className="w-4 h-4" /> },
+      {
+        id: 'continuity',
+        label: `Continuity (${activeContinuityCount})`,
+        icon: <ShieldAlert className="w-4 h-4" />,
+        hasAlert: activeContinuityCount > 0,
+      },
+    ];
+
+    return (
+      <aside className="w-10 flex-shrink-0 bg-[#1b1b1b] border-l border-[#383838] flex flex-col items-center py-2.5 gap-2 h-full text-xs select-none">
+        {onToggleCollapse && (
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            title="Expand Right Inspector Panel"
+            aria-label="Expand Right Inspector Panel"
+            className="p-1.5 rounded bg-[#252525] hover:bg-[#333333] text-gray-300 hover:text-[#ff8000] border border-[#3a3a3a] transition-colors"
+          >
+            <PanelRightOpen className="w-4 h-4" />
+          </button>
+        )}
+
+        <div className="w-5 h-px bg-[#323232] my-0.5" />
+
+        {railItems.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => {
+              setActiveTab(item.id);
+              onToggleCollapse?.();
+            }}
+            title={item.label}
+            className={`relative p-1.5 rounded transition-colors ${
+              activeTab === item.id
+                ? 'bg-[#2a2219] text-[#ff8000] border border-[#ff8000]/40'
+                : item.hasAlert
+                ? 'text-rose-300 hover:text-rose-200 hover:bg-[#262626]'
+                : 'text-gray-400 hover:text-gray-200 hover:bg-[#262626]'
+            }`}
+          >
+            {item.icon}
+          </button>
+        ))}
+
+        <div className="mt-auto pb-2 text-[10px] font-semibold tracking-widest text-gray-500 [writing-mode:vertical-rl]">
+          INSPECTOR
+        </div>
+      </aside>
+    );
+  }
+
   return (
     <aside className="w-80 flex-shrink-0 bg-[#242424] border-l border-[#383838] flex flex-col h-full text-xs select-none">
-      {/* Column Tabs Matching Adobe Story Multi-Panel Inspector */}
-      <div className="flex border-b border-[#383838] bg-[#1c1c1c] overflow-x-auto no-scrollbar text-[11px]">
+      {/* Inspector Header with Collapse Button */}
+      <div className="px-3 py-1.5 bg-[#181818] border-b border-[#323232] flex items-center justify-between gap-2">
+        <span className="text-[11px] font-semibold text-gray-300 tracking-wide truncate">
+          Scene Inspector
+        </span>
+        {onToggleCollapse && (
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            title="Collapse Right Panel to Maximize Center Window"
+            aria-label="Collapse Right Inspector Panel"
+            className="p-1 rounded text-gray-400 hover:text-[#ff8000] hover:bg-[#282828] transition-colors shrink-0"
+          >
+            <PanelRightClose className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+
+      {/* Stacked 2-Row Tab Grid (3 Columns × 2 Rows for Clear Scannability) */}
+      <div className="grid grid-cols-3 border-b border-[#383838] bg-[#1c1c1c] text-[11px]">
+        {/* Row 1 */}
         <button
+          type="button"
           onClick={() => setActiveTab('properties')}
-          className={`flex-1 min-w-[56px] py-2 text-center font-semibold tracking-wider transition-colors border-r border-[#333] ${
+          className={`py-2 px-1.5 flex items-center justify-center gap-1.5 font-semibold transition-colors border-r border-b border-[#303030] whitespace-nowrap truncate ${
             activeTab === 'properties'
-              ? 'bg-[#242424] text-[#ff8000] border-t-2 border-t-[#ff8000]'
+              ? 'bg-[#262626] text-[#ff8000] shadow-[inset_0_2px_0_0_#ff8000]'
               : 'text-gray-400 hover:text-gray-200 hover:bg-[#222]'
           }`}
+          title="Scene Properties"
         >
-          SCENE
+          <Sliders className="w-3 h-3 shrink-0" />
+          <span>Scene</span>
         </button>
         <button
+          type="button"
           onClick={() => setActiveTab('comments')}
-          className={`flex-1 min-w-[62px] py-2 text-center font-semibold tracking-wider transition-colors border-r border-[#333] ${
+          className={`py-2 px-1.5 flex items-center justify-center gap-1 font-semibold transition-colors border-r border-b border-[#303030] whitespace-nowrap truncate tabular-nums ${
             activeTab === 'comments'
-              ? 'bg-[#242424] text-[#ff8000] border-t-2 border-t-[#ff8000]'
+              ? 'bg-[#262626] text-[#ff8000] shadow-[inset_0_2px_0_0_#ff8000]'
               : 'text-gray-400 hover:text-gray-200 hover:bg-[#222]'
           }`}
           title="Review Comments"
         >
-          COMMENTS ({comments.filter((c) => !c.resolved).length})
+          <MessageSquare className="w-3 h-3 shrink-0" />
+          <span>Comments ({openCommentsCount})</span>
         </button>
         <button
+          type="button"
           onClick={() => setActiveTab('tags')}
-          className={`flex-1 min-w-[50px] py-2 text-center font-semibold tracking-wider transition-colors border-r border-[#333] ${
+          className={`py-2 px-1.5 flex items-center justify-center gap-1 font-semibold transition-colors border-b border-[#303030] whitespace-nowrap truncate tabular-nums ${
             activeTab === 'tags'
-              ? 'bg-[#242424] text-[#ff8000] border-t-2 border-t-[#ff8000]'
+              ? 'bg-[#262626] text-[#ff8000] shadow-[inset_0_2px_0_0_#ff8000]'
               : 'text-gray-400 hover:text-gray-200 hover:bg-[#222]'
           }`}
+          title="Scene & Script Tags"
         >
-          TAGS ({tags.length})
+          <TagIcon className="w-3 h-3 shrink-0" />
+          <span>Tags ({tags.length})</span>
         </button>
+
+        {/* Row 2 */}
         <button
+          type="button"
           onClick={() => setActiveTab('shots')}
-          className={`flex-1 min-w-[54px] py-2 text-center font-semibold tracking-wider transition-colors border-r border-[#333] ${
+          className={`py-2 px-1.5 flex items-center justify-center gap-1 font-semibold transition-colors border-r border-[#303030] whitespace-nowrap truncate tabular-nums ${
             activeTab === 'shots'
-              ? 'bg-[#242424] text-[#ff8000] border-t-2 border-t-[#ff8000]'
+              ? 'bg-[#262626] text-[#ff8000] shadow-[inset_0_2px_0_0_#ff8000]'
               : 'text-gray-400 hover:text-gray-200 hover:bg-[#222]'
           }`}
+          title="Storyboard & Camera Shots"
         >
-          SHOTS ({sceneShots.length})
+          <Camera className="w-3 h-3 shrink-0" />
+          <span>Shots ({sceneShots.length})</span>
         </button>
         <button
+          type="button"
           onClick={() => setActiveTab('history')}
-          className={`flex-1 min-w-[58px] py-2 text-center font-semibold tracking-wider transition-colors ${
+          className={`py-2 px-1.5 flex items-center justify-center gap-1 font-semibold transition-colors border-r border-[#303030] whitespace-nowrap truncate tabular-nums ${
             activeTab === 'history'
-              ? 'bg-[#242424] text-[#ff8000] border-t-2 border-t-[#ff8000]'
+              ? 'bg-[#262626] text-[#ff8000] shadow-[inset_0_2px_0_0_#ff8000]'
               : 'text-gray-400 hover:text-gray-200 hover:bg-[#222]'
           }`}
           title="Screenplay Revision History & Edits"
         >
-          HISTORY ({scopedRevisions.length})
+          <History className="w-3 h-3 shrink-0" />
+          <span>History ({scopedRevisions.length})</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('continuity')}
+          className={`py-2 px-1.5 flex items-center justify-center gap-1 font-semibold transition-colors whitespace-nowrap truncate tabular-nums ${
+            activeTab === 'continuity'
+              ? 'bg-[#262626] text-[#ff8000] shadow-[inset_0_2px_0_0_#ff8000]'
+              : activeContinuityCount > 0
+              ? 'text-rose-300 hover:text-rose-200 hover:bg-[#222]'
+              : 'text-gray-400 hover:text-gray-200 hover:bg-[#222]'
+          }`}
+          title="Automated Prop & Costume Continuity Check"
+        >
+          <ShieldAlert
+            className={`w-3 h-3 shrink-0 ${
+              activeContinuityCount > 0 ? 'text-rose-400' : ''
+            }`}
+          />
+          <span>Continuity ({activeContinuityCount})</span>
         </button>
       </div>
 
@@ -1099,6 +1249,20 @@ export const InspectorColumn: React.FC<InspectorColumnProps> = ({
             )}
           </div>
         </div>
+      )}
+
+      {/* TAB 6: SCENE CONTINUITY CHECK */}
+      {activeTab === 'continuity' && continuityReport && (
+        <SceneContinuityPanel
+          report={continuityReport}
+          selectedScene={selectedScene}
+          onJumpToOccurrence={(sceneId, elementId) =>
+            onJumpToOccurrence?.(sceneId, elementId)
+          }
+          onAcknowledgeAlert={(alertId) => onAcknowledgeContinuity?.(alertId)}
+          onRestoreAlert={(alertId) => onRestoreContinuity?.(alertId)}
+          onOpenFullModal={() => onOpenContinuityModal?.()}
+        />
       )}
     </aside>
   );

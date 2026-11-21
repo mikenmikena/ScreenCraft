@@ -1,5 +1,12 @@
 import { StoryProject } from '../types/story';
 
+const isoDaysAgo = (daysAgo: number, hour: number = 9, minute: number = 0): string => {
+  const d = new Date();
+  d.setDate(d.getDate() - daysAgo);
+  d.setHours(hour, minute, 0, 0);
+  return d.toISOString();
+};
+
 export const SAMPLE_PROJECTS: StoryProject[] = [
   {
     id: 'cos-intro',
@@ -62,6 +69,41 @@ export const SAMPLE_PROJECTS: StoryProject[] = [
         },
       ],
     },
+    characterRelationships: [
+      {
+        id: 'rel-cos-1',
+        sourceCharacter: 'AMBASSADOR JULIAN',
+        targetCharacter: 'COUNCILOR VERN KRAMEN',
+        label: 'Oversight Clash',
+        polarity: 'conflict',
+        direction: 'mutual',
+        storyDriver:
+          'Julian threatens to expose the covert Venusian blockade pact that Kramen is desperate to bury under diplomatic protocol.',
+        arcShift: 'Procedural Censure → Direct Confrontation in Quarters',
+      },
+      {
+        id: 'rel-cos-2',
+        sourceCharacter: 'AMBASSADOR JULIAN',
+        targetCharacter: 'CHIEF SIMMONS',
+        label: 'Reluctant Allies',
+        polarity: 'alliance',
+        direction: 'mutual',
+        storyDriver:
+          'Simmons gives Julian tactical security clearance despite Kramen’s orders, creating pressure on Simmons’ career.',
+        arcShift: 'Guarded Compliance → Covert Coordination',
+      },
+      {
+        id: 'rel-cos-3',
+        sourceCharacter: 'COUNCILOR VERN KRAMEN',
+        targetCharacter: 'CHIEF SIMMONS',
+        label: 'Chain of Command',
+        polarity: 'hierarchy',
+        direction: 'source_to_target',
+        storyDriver:
+          'Kramen leverages institutional authority to keep Simmons policing Julian’s transport access.',
+        arcShift: 'Strict Enforcement → Cracks in Loyalty',
+      },
+    ],
     characters: [
       { name: 'AMBASSADOR JULIAN', color: '#00d2d3', actor: 'Julian Vance', scenesCount: 6, speakingLines: 34 },
       { name: 'COUNCILOR VERN KRAMEN', color: '#ff4757', actor: 'Vernon Kramen', scenesCount: 4, speakingLines: 28 },
@@ -537,7 +579,7 @@ export const SAMPLE_PROJECTS: StoryProject[] = [
       },
       {
         id: 'rev-cos-2',
-        timestamp: '2026-10-24T06:30:12Z',
+        timestamp: isoDaysAgo(0, 6, 30),
         dateFormatted: 'Today at 06:30 AM',
         author: 'Jeffrey (Online)',
         changeType: 'text_edit',
@@ -552,7 +594,7 @@ export const SAMPLE_PROJECTS: StoryProject[] = [
       },
       {
         id: 'rev-cos-3',
-        timestamp: '2026-10-24T06:45:00Z',
+        timestamp: isoDaysAgo(0, 6, 45),
         dateFormatted: 'Today at 06:45 AM',
         author: 'Whitney (Script Supervisor)',
         changeType: 'element_added',
@@ -566,8 +608,8 @@ export const SAMPLE_PROJECTS: StoryProject[] = [
       },
       {
         id: 'rev-cos-4',
-        timestamp: '2026-10-24T07:05:22Z',
-        dateFormatted: 'Today at 07:05 AM',
+        timestamp: isoDaysAgo(3, 14, 5),
+        dateFormatted: '3 days ago',
         author: 'Jeffrey (Online)',
         changeType: 'text_edit',
         elementType: 'ACTION',
@@ -1038,8 +1080,8 @@ export const SAMPLE_PROJECTS: StoryProject[] = [
       },
       {
         id: 'rev-eng-2',
-        timestamp: '2026-10-24T18:25:30Z',
-        dateFormatted: 'Oct 24, 06:25 PM',
+        timestamp: isoDaysAgo(0, 10, 25),
+        dateFormatted: 'Today at 10:25 AM',
         author: 'Larry Jordan',
         changeType: 'text_edit',
         elementType: 'ACTION',
@@ -1053,8 +1095,8 @@ export const SAMPLE_PROJECTS: StoryProject[] = [
       },
       {
         id: 'rev-eng-3',
-        timestamp: '2026-10-24T18:38:00Z',
-        dateFormatted: 'Oct 24, 06:38 PM',
+        timestamp: isoDaysAgo(2, 16, 38),
+        dateFormatted: '2 days ago',
         author: 'Larry Jordan',
         changeType: 'element_added',
         elementType: 'PARENTHETICAL',

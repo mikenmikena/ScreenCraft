@@ -160,13 +160,22 @@ export function parseFountain(text: string): { elements: ScreenplayElement[]; sc
       continue;
     }
 
-    // Dialogue: previous element was Character or Parenthetical
+    // Dialogue or Voice-over: previous element was Character or Parenthetical
     const lastElement = elements[elements.length - 1];
     if (lastElement && (lastElement.type === 'CHARACTER' || lastElement.type === 'PARENTHETICAL')) {
+      let precedingChar: ScreenplayElement | undefined =
+        lastElement.type === 'CHARACTER' ? lastElement : undefined;
+      if (!precedingChar && elements.length >= 2 && elements[elements.length - 2].type === 'CHARACTER') {
+        precedingChar = elements[elements.length - 2];
+      }
+      const isVoiceOverCue = Boolean(
+        precedingChar && /\((V\.?O\.?|VOICE\s*OVER)\)/i.test(precedingChar.text)
+      );
       elements.push({
         id: `el-${elements.length + 1}`,
-        type: 'DIALOGUE',
+        type: isVoiceOverCue ? 'VOICE_OVER' : 'DIALOGUE',
         text: trimmed,
+        character: precedingChar?.character,
         sceneId: currentSceneId,
       });
       continue;
@@ -188,17 +197,28 @@ export function parseFountain(text: string): { elements: ScreenplayElement[]; sc
 export function serializeToFountain(project: StoryProject): string {
   let output = `Title: ${project.title}\nCredit: Written by\nAuthor: ${project.author}\n\n`;
 
-  for (const el of project.elements) {
+  for (let i = 0; i < project.elements.length; i++) {
+    const el = project.elements[i];
     if (el.type === 'SCENE_HEADING') {
       output += `\n${el.text}\n\n`;
     } else if (el.type === 'SHOT') {
       output += `${el.text}\n\n`;
     } else if (el.type === 'CHARACTER') {
-      output += `\n${el.text}\n`;
+      const nextEl = project.elements[i + 1];
+      const nextAfterParen = nextEl?.type === 'PARENTHETICAL' ? project.elements[i + 2] : undefined;
+      const followedByVO = nextEl?.type === 'VOICE_OVER' || nextAfterParen?.type === 'VOICE_OVER';
+      const hasVO = /\((V\.?O\.?|VOICE\s*OVER)\)/i.test(el.text);
+      output += `\n${followedByVO && !hasVO ? `${el.text} (V.O.)` : el.text}\n`;
     } else if (el.type === 'PARENTHETICAL') {
       output += `${el.text}\n`;
-    } else if (el.type === 'DIALOGUE') {
-      output += `${el.text}\n\n`;
+    } else if (el.type === 'DIALOGUE' || el.type === 'VOICE_OVER') {
+      const prevEl = project.elements[i - 1];
+      if (el.type === 'VOICE_OVER' && prevEl?.type !== 'CHARACTER' && prevEl?.type !== 'PARENTHETICAL') {
+        const speaker = (el.character || 'NARRATOR').toUpperCase();
+        output += `\n${speaker} (V.O.)\n${el.text}\n\n`;
+      } else {
+        output += `${el.text}\n\n`;
+      }
     } else if (el.type === 'TRANSITION') {
       output += `\n> ${el.text}\n\n`;
     } else {
@@ -209,32 +229,91 @@ export function serializeToFountain(project: StoryProject): string {
   return output;
 }
 
-export function exportToFinalDraftFdx(project: StoryProject): string {
-  let fdx = `<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
-<FinalDraft DocumentType="Script" Template="No" Version="1">
-  <Content>
-    <Paragraph Type="General">
-      <Text>${project.title}</Text>
-    </Paragraph>
-`;
+export interface ExportFdxOptions {
+  includeSceneNumbers?: boolean;
+  includeTitlePage?: boolean;
+}
 
-  for (const el of project.elements) {
-    let fdxType = 'Action';
-    if (el.type === 'SCENE_HEADING') fdxType = 'Scene Heading';
-    else if (el.type === 'CHARACTER') fdxType = 'Character';
-    else if (el.type === 'DIALOGUE') fdxType = 'Dialogue';
-    else if (el.type === 'PARENTHETICAL') fdxType = 'Parenthetical';
-    else if (el.type === 'TRANSITION') fdxType = 'Transition';
-    else if (el.type === 'SHOT') fdxType = 'Shot';
+export function exportToFinalDraftFdx(
+  project: StoryProject,
+  options: ExportFdxOptions = {}
+): string {
+  const { includeSceneNumbers = true, includeTitlePage = true } = options;
+  const sceneMap = new Map<string, Scene>();
+  project.scenes.forEach((sc) => sceneMap.set(sc.id, sc));
 
-    const safeText = el.text
+  const escapeXml = (str: string) =>
+    str
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
 
-    fdx += `    <Paragraph Type="${fdxType}">
-      <Text>${safeText}</Text>
+  let fdx = `<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<FinalDraft DocumentType="Script" Template="No" Version="4">
+`;
+
+  if (includeTitlePage) {
+    fdx += `  <TitlePage>
+    <Content>
+      <Paragraph Alignment="Center" Type="Title">
+        <Text>${escapeXml(project.title.toUpperCase())}</Text>
+      </Paragraph>
+      <Paragraph Alignment="Center" Type="Authors">
+        <Text>Written by ${escapeXml(project.author)}</Text>
+      </Paragraph>
+    </Content>
+  </TitlePage>
+`;
+  }
+
+  fdx += `  <Content>
+`;
+
+  for (let i = 0; i < project.elements.length; i++) {
+    const el = project.elements[i];
+    const prevEl = i > 0 ? project.elements[i - 1] : undefined;
+    const nextEl = i + 1 < project.elements.length ? project.elements[i + 1] : undefined;
+    const nextAfterParen =
+      nextEl?.type === 'PARENTHETICAL' ? project.elements[i + 2] : undefined;
+
+    if (
+      el.type === 'VOICE_OVER' &&
+      prevEl?.type !== 'CHARACTER' &&
+      prevEl?.type !== 'PARENTHETICAL'
+    ) {
+      const speaker = (el.character || 'NARRATOR').toUpperCase();
+      fdx += `    <Paragraph Type="Character">
+      <Text>${escapeXml(`${speaker} (V.O.)`)}</Text>
+    </Paragraph>\n`;
+    }
+
+    let fdxType = 'Action';
+    if (el.type === 'SCENE_HEADING') fdxType = 'Scene Heading';
+    else if (el.type === 'CHARACTER') fdxType = 'Character';
+    else if (el.type === 'DIALOGUE' || el.type === 'VOICE_OVER') fdxType = 'Dialogue';
+    else if (el.type === 'PARENTHETICAL') fdxType = 'Parenthetical';
+    else if (el.type === 'TRANSITION') fdxType = 'Transition';
+    else if (el.type === 'SHOT') fdxType = 'Shot';
+
+    let outputText = el.text;
+    if (el.type === 'CHARACTER') {
+      const followedByVO =
+        nextEl?.type === 'VOICE_OVER' || nextAfterParen?.type === 'VOICE_OVER';
+      const hasVO = /\((V\.?O\.?|VOICE\s*OVER)\)/i.test(outputText);
+      if (followedByVO && !hasVO) {
+        outputText = `${outputText.trim()} (V.O.)`;
+      }
+    }
+
+    const scene = el.sceneId ? sceneMap.get(el.sceneId) : undefined;
+    const numberAttr =
+      includeSceneNumbers && el.type === 'SCENE_HEADING' && scene
+        ? ` Number="${scene.sceneNumber}"`
+        : '';
+
+    fdx += `    <Paragraph Type="${fdxType}"${numberAttr}>
+      <Text>${escapeXml(outputText)}</Text>
     </Paragraph>\n`;
   }
 

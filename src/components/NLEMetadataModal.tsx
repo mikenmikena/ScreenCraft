@@ -1,16 +1,21 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
+  NLEExportConfig,
+  NLEExportPreset,
   NLEFrameRate,
   NLEGeneratedSidecarEntry,
   NLESidecarFormat,
+  NLETargetSoftware,
   StoryProject,
   TranscriptAlignmentMatch,
 } from '../types/story';
 import {
   alignTranscriptToDialogue,
+  analyzeCharacterPresenceAndScheduleConflicts,
   buildNLEMetadataDocument,
   computeScriptFingerprint,
   createGeneratedSidecarEntry,
+  DEFAULT_NLE_PRESETS,
   DialogueQueryMatchMode,
   DialogueQueryResult,
   exportPremiereProXML,
@@ -47,6 +52,11 @@ import {
   Trash2,
   Clock,
   GitCommitHorizontal,
+  Sliders,
+  Save,
+  Bookmark,
+  CalendarClock,
+  Users,
 } from 'lucide-react';
 
 interface NLEMetadataModalProps {
@@ -78,6 +88,19 @@ const renderHighlightedText = (text: string, query: string): React.ReactNode => 
   );
 };
 
+const NLE_PRESETS_STORAGE_KEY = 'screencraft_nle_export_presets_v1';
+
+const loadCustomPresetsFromStorage = (): NLEExportPreset[] => {
+  try {
+    const raw = localStorage.getItem(NLE_PRESETS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
 export const NLEMetadataModal: React.FC<NLEMetadataModalProps> = ({
   project,
   onClose,
@@ -88,9 +111,106 @@ export const NLEMetadataModal: React.FC<NLEMetadataModalProps> = ({
   const [activeTab, setActiveTab] = useState<
     'export' | 'dialogue_index' | 'stt_align' | 'generated_log'
   >('export');
-  const [frameRate, setFrameRate] = useState<NLEFrameRate>(24);
-  const [previewFormat, setPreviewFormat] = useState<'xml' | 'json'>('xml');
+  const [frameRate, setFrameRate] = useState<NLEFrameRate>(
+    DEFAULT_NLE_PRESETS[0].config.frameRate
+  );
+  const [previewFormat, setPreviewFormat] = useState<'xml' | 'json'>(
+    DEFAULT_NLE_PRESETS[0].config.preferredFormat
+  );
   const [copiedState, setCopiedState] = useState<string | null>(null);
+
+  // NLE Presets state
+  const [customPresets, setCustomPresets] = useState<NLEExportPreset[]>(() =>
+    loadCustomPresetsFromStorage()
+  );
+  const [activePresetId, setActivePresetId] = useState<string>(DEFAULT_NLE_PRESETS[0].id);
+  const [exportConfig, setExportConfig] = useState<NLEExportConfig>(() => ({
+    ...DEFAULT_NLE_PRESETS[0].config,
+  }));
+  const [isPresetsExpanded, setIsPresetsExpanded] = useState<boolean>(true);
+  const [showSavePresetForm, setShowSavePresetForm] = useState<boolean>(false);
+  const [newPresetName, setNewPresetName] = useState<string>('');
+  const [newPresetTarget, setNewPresetTarget] = useState<NLETargetSoftware>('Adobe Premiere Pro');
+  const [newPresetDesc, setNewPresetDesc] = useState<string>('');
+  const [presetFeedback, setPresetFeedback] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(NLE_PRESETS_STORAGE_KEY, JSON.stringify(customPresets));
+    } catch {
+      // Ignore storage quota errors
+    }
+  }, [customPresets]);
+
+  const allPresets = useMemo(
+    () => [...DEFAULT_NLE_PRESETS, ...customPresets],
+    [customPresets]
+  );
+
+  const activePreset = useMemo(
+    () => allPresets.find((p) => p.id === activePresetId) || null,
+    [allPresets, activePresetId]
+  );
+
+  const isPresetModified = useMemo(() => {
+    if (!activePreset) return true;
+    return JSON.stringify(activePreset.config) !== JSON.stringify(exportConfig);
+  }, [activePreset, exportConfig]);
+
+  const handleLoadPreset = (preset: NLEExportPreset) => {
+    setActivePresetId(preset.id);
+    setExportConfig({ ...preset.config });
+    setFrameRate(preset.config.frameRate);
+    setPreviewFormat(preset.config.preferredFormat);
+    setPresetFeedback(`Loaded "${preset.name}"`);
+    setTimeout(() => setPresetFeedback(null), 2200);
+  };
+
+  const updateExportConfig = (patch: Partial<NLEExportConfig>) => {
+    setExportConfig((prev) => {
+      const next = { ...prev, ...patch };
+      if (patch.frameRate !== undefined) setFrameRate(patch.frameRate);
+      if (patch.preferredFormat !== undefined) setPreviewFormat(patch.preferredFormat);
+      return next;
+    });
+  };
+
+  const handleSaveCustomPreset = () => {
+    const trimmedName = newPresetName.trim();
+    if (!trimmedName) return;
+    const savedConfig: NLEExportConfig = {
+      ...exportConfig,
+      nleTarget: newPresetTarget,
+      frameRate,
+      preferredFormat: previewFormat,
+    };
+    const created: NLEExportPreset = {
+      id: `preset-custom-${Date.now()}`,
+      name: trimmedName,
+      nleTarget: newPresetTarget,
+      description:
+        newPresetDesc.trim() ||
+        `${newPresetTarget} · ${frameRate}fps · TC ${savedConfig.timecodeStart} · ${savedConfig.preferredFormat.toUpperCase()}`,
+      isBuiltIn: false,
+      updatedAt: new Date().toISOString(),
+      config: savedConfig,
+    };
+    setCustomPresets((prev) => [created, ...prev]);
+    setActivePresetId(created.id);
+    setExportConfig(savedConfig);
+    setNewPresetName('');
+    setNewPresetDesc('');
+    setShowSavePresetForm(false);
+    setPresetFeedback(`Saved preset "${created.name}"`);
+    setTimeout(() => setPresetFeedback(null), 2400);
+  };
+
+  const handleDeleteCustomPreset = (presetId: string) => {
+    setCustomPresets((prev) => prev.filter((p) => p.id !== presetId));
+    if (activePresetId === presetId) {
+      setActivePresetId(DEFAULT_NLE_PRESETS[0].id);
+    }
+  };
 
   // Dialogue Query state
   const [dialogueQuery, setDialogueQuery] = useState('');
@@ -128,14 +248,22 @@ export const NLEMetadataModal: React.FC<NLEMetadataModalProps> = ({
     [project, scanPulse]
   );
 
+  const charCrossRef = useMemo(
+    () => analyzeCharacterPresenceAndScheduleConflicts(project),
+    [project]
+  );
+
+  const getCharColor = (name: string): string =>
+    charCrossRef.characterColors[name.trim().toUpperCase()] || '#9ca3af';
+
   const filteredPreFlightWarnings = useMemo(() => {
     if (preFlightFilter === 'all') return preFlightReport.warnings;
     return preFlightReport.warnings.filter((w) => w.category === preFlightFilter);
   }, [preFlightReport, preFlightFilter]);
 
   const metadataDoc = useMemo(
-    () => buildNLEMetadataDocument(project, frameRate),
-    [project, frameRate]
+    () => buildNLEMetadataDocument(project, frameRate, exportConfig, activePreset?.name),
+    [project, frameRate, exportConfig, activePreset?.name]
   );
 
   const alignedMatches: TranscriptAlignmentMatch[] = useMemo(
@@ -156,8 +284,8 @@ export const NLEMetadataModal: React.FC<NLEMetadataModalProps> = ({
   }, [alignedMatches]);
 
   const xmlOutput = useMemo(
-    () => exportPremiereProXML(project, frameRate, alignedMatches),
-    [project, frameRate, alignedMatches]
+    () => exportPremiereProXML(project, frameRate, alignedMatches, exportConfig),
+    [project, frameRate, alignedMatches, exportConfig]
   );
 
   const jsonOutput = useMemo(
@@ -313,6 +441,7 @@ export const NLEMetadataModal: React.FC<NLEMetadataModalProps> = ({
   };
 
   const baseSlug = project.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+  const fileSuffix = exportConfig.filenameSuffix || '';
 
   return (
     <div className="fixed inset-0 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 z-50 select-none text-xs text-gray-200">
@@ -328,7 +457,7 @@ export const NLEMetadataModal: React.FC<NLEMetadataModalProps> = ({
                 Script-to-NLE Metadata Pipeline & Speech-to-Text Alignment
               </h2>
               <p className="text-[11px] text-gray-400 truncate">
-                {project.title} · {metadataDoc.schemaVersion} · Premiere Pro XMEML v4 & Dialogue Query
+                {project.title} · {exportConfig.nleTarget} · Preset: {activePreset ? activePreset.name : 'Custom'} {isPresetModified ? '(Modified)' : ''}
               </p>
             </div>
           </div>
@@ -338,7 +467,11 @@ export const NLEMetadataModal: React.FC<NLEMetadataModalProps> = ({
               <span className="text-[11px] text-gray-400">Timebase:</span>
               <select
                 value={frameRate}
-                onChange={(e) => setFrameRate(Number(e.target.value) as NLEFrameRate)}
+                onChange={(e) => {
+                  const nextFps = Number(e.target.value) as NLEFrameRate;
+                  setFrameRate(nextFps);
+                  setExportConfig((prev) => ({ ...prev, frameRate: nextFps }));
+                }}
                 className="bg-transparent text-amber-300 font-mono text-xs font-semibold focus:outline-none cursor-pointer"
               >
                 <option value={23.976} className="bg-[#222]">23.976 fps</option>
@@ -408,7 +541,30 @@ export const NLEMetadataModal: React.FC<NLEMetadataModalProps> = ({
             </button>
           </div>
 
-          <div className="flex items-center gap-3 text-[11px] font-mono tabular-nums whitespace-nowrap shrink-0">
+          <div className="flex items-center gap-2.5 text-[11px] font-mono tabular-nums whitespace-nowrap shrink-0">
+            <button
+              onClick={() => setActiveTab('dialogue_index')}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded border text-[11px] font-sans font-medium transition-colors whitespace-nowrap shrink-0 ${
+                charCrossRef.conflicts.length > 0
+                  ? 'bg-rose-950/60 border-rose-700/60 text-rose-300 hover:bg-rose-950/90'
+                  : 'bg-[#1a2226] border-cyan-800/50 text-cyan-300 hover:bg-[#1f292e]'
+              }`}
+              title="Cross-reference character presence indicators against Production Schedule"
+            >
+              <CalendarClock
+                className={`w-3.5 h-3.5 ${
+                  charCrossRef.conflicts.length > 0 ? 'text-rose-400' : 'text-cyan-400'
+                }`}
+              />
+              <span>
+                {charCrossRef.conflicts.length > 0
+                  ? `${charCrossRef.conflicts.length} Cast 2-Loc Conflict${
+                      charCrossRef.conflicts.length === 1 ? '' : 's'
+                    }`
+                  : 'Cast Schedule Synced'}
+              </span>
+            </button>
+
             <button
               onClick={() => {
                 setActiveTab('export');
@@ -434,11 +590,9 @@ export const NLEMetadataModal: React.FC<NLEMetadataModalProps> = ({
                     }`}
               </span>
             </button>
-            <span className="text-gray-400">{metadataDoc.scenes.length} Scenes</span>
-            <span className="text-gray-600">·</span>
-            <span className="text-gray-400">{metadataDoc.blocks.length} Blocks</span>
-            <span className="text-gray-600">·</span>
-            <span className="text-gray-400">{metadataDoc.totalDurationSec.toFixed(1)}s</span>
+            <span className="text-gray-400 hidden xl:inline">{metadataDoc.scenes.length} Scenes</span>
+            <span className="text-gray-600 hidden xl:inline">·</span>
+            <span className="text-gray-400 hidden xl:inline">{metadataDoc.totalDurationSec.toFixed(1)}s</span>
           </div>
         </div>
 
@@ -669,6 +823,261 @@ export const NLEMetadataModal: React.FC<NLEMetadataModalProps> = ({
                 )}
               </div>
 
+              {/* Sidecar Presets Section */}
+              <div className="bg-[#181818] border border-[#343434] rounded flex-shrink-0 overflow-hidden">
+                <div className="px-3.5 py-2.5 bg-[#1b1b1b] flex flex-wrap items-center justify-between gap-2 border-b border-[#2e2e2e]">
+                  <button
+                    onClick={() => setIsPresetsExpanded((v) => !v)}
+                    className="flex items-center gap-2 text-left min-w-0"
+                  >
+                    {isPresetsExpanded ? (
+                      <ChevronDown className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                    ) : (
+                      <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                    )}
+                    <Sliders className="w-4 h-4 text-[#ff8000] shrink-0" />
+                    <div className="min-w-0 flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-xs text-gray-100">
+                        Presets — Sidecar NLE Profiles
+                      </span>
+                      <span className="px-1.5 py-0.5 rounded-xs bg-[#262626] border border-[#3b3b3b] text-[10px] font-mono text-amber-300">
+                        {activePreset ? activePreset.name : 'Custom Profile'}
+                      </span>
+                      {isPresetModified && (
+                        <span className="px-1.5 py-0.5 rounded-xs bg-amber-950/60 border border-amber-700/50 text-[10px] text-amber-300">
+                          Modified
+                        </span>
+                      )}
+                      {presetFeedback && (
+                        <span className="text-[11px] text-emerald-400 font-medium">
+                          {presetFeedback}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={() => {
+                        setNewPresetTarget(exportConfig.nleTarget);
+                        setShowSavePresetForm((v) => !v);
+                        setIsPresetsExpanded(true);
+                      }}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#252525] hover:bg-[#303030] border border-[#3f3f3f] text-[11px] text-amber-300 whitespace-nowrap shrink-0"
+                    >
+                      <Save className="w-3 h-3" />
+                      <span>Save Current as Preset</span>
+                    </button>
+                  </div>
+                </div>
+
+                {isPresetsExpanded && (
+                  <div className="p-3.5 space-y-3">
+                    {/* Preset Cards */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                      {allPresets.map((preset) => {
+                        const isActive = preset.id === activePresetId;
+                        return (
+                          <div
+                            key={preset.id}
+                            className={`rounded border p-2.5 flex flex-col justify-between gap-2 transition-colors ${
+                              isActive
+                                ? 'bg-[#261f17] border-[#ff7700]/80'
+                                : 'bg-[#141414] border-[#2e2e2e] hover:border-[#464646]'
+                            }`}
+                          >
+                            <div className="space-y-1">
+                              <div className="flex items-start justify-between gap-1.5">
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5">
+                                    <Bookmark
+                                      className={`w-3 h-3 shrink-0 ${
+                                        isActive ? 'text-[#ff8000]' : 'text-gray-500'
+                                      }`}
+                                    />
+                                    <span className="font-semibold text-[11px] text-gray-100 truncate">
+                                      {preset.name}
+                                    </span>
+                                  </div>
+                                  <div className="text-[10px] font-mono text-cyan-400 mt-0.5">
+                                    {preset.nleTarget} · {preset.config.frameRate}fps · TC{' '}
+                                    {preset.config.timecodeStart}
+                                  </div>
+                                </div>
+
+                                {!preset.isBuiltIn && (
+                                  <button
+                                    onClick={() => handleDeleteCustomPreset(preset.id)}
+                                    className="p-1 text-gray-500 hover:text-rose-400 rounded shrink-0"
+                                    title="Delete custom preset"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-gray-400 leading-snug line-clamp-2">
+                                {preset.description}
+                              </p>
+                            </div>
+
+                            <div className="flex items-center justify-between gap-2 pt-1 border-t border-[#262626]">
+                              <span className="text-[10px] font-mono text-gray-500">
+                                {preset.isBuiltIn ? 'Built-in' : 'Saved Preset'} ·{' '}
+                                {preset.config.preferredFormat.toUpperCase()}
+                              </span>
+                              <button
+                                onClick={() => handleLoadPreset(preset)}
+                                className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-colors whitespace-nowrap shrink-0 ${
+                                  isActive
+                                    ? 'bg-[#ff7700] text-black'
+                                    : 'bg-[#262626] hover:bg-[#353535] text-gray-200 border border-[#3b3b3b]'
+                                }`}
+                              >
+                                {isActive && !isPresetModified ? 'Active' : 'Load Preset'}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Inline Save Preset Form */}
+                    {showSavePresetForm && (
+                      <div className="p-3 rounded bg-[#141414] border border-[#ff7700]/60 grid grid-cols-1 md:grid-cols-12 gap-2.5 items-end">
+                        <div className="md:col-span-4 space-y-1">
+                          <label className="text-[10px] text-gray-400 block">Preset Name</label>
+                          <input
+                            type="text"
+                            value={newPresetName}
+                            onChange={(e) => setNewPresetName(e.target.value)}
+                            placeholder="e.g. Resolve Color Lock 23.976"
+                            className="w-full bg-[#1c1c1c] border border-[#3a3a3a] rounded px-2.5 py-1 text-xs text-gray-100 focus:outline-none focus:border-[#ff8000]"
+                          />
+                        </div>
+                        <div className="md:col-span-3 space-y-1">
+                          <label className="text-[10px] text-gray-400 block">Target NLE</label>
+                          <select
+                            value={newPresetTarget}
+                            onChange={(e) =>
+                              setNewPresetTarget(e.target.value as NLETargetSoftware)
+                            }
+                            className="w-full bg-[#1c1c1c] border border-[#3a3a3a] rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-[#ff8000]"
+                          >
+                            <option value="Adobe Premiere Pro">Adobe Premiere Pro</option>
+                            <option value="DaVinci Resolve">DaVinci Resolve</option>
+                            <option value="Avid Media Composer">Avid Media Composer</option>
+                            <option value="Custom NLE">Custom NLE</option>
+                          </select>
+                        </div>
+                        <div className="md:col-span-3 space-y-1">
+                          <label className="text-[10px] text-gray-400 block">Notes (optional)</label>
+                          <input
+                            type="text"
+                            value={newPresetDesc}
+                            onChange={(e) => setNewPresetDesc(e.target.value)}
+                            placeholder="Marker & timecode notes..."
+                            className="w-full bg-[#1c1c1c] border border-[#3a3a3a] rounded px-2.5 py-1 text-xs text-gray-100 focus:outline-none focus:border-[#ff8000]"
+                          />
+                        </div>
+                        <div className="md:col-span-2 flex items-center gap-1.5 justify-end">
+                          <button
+                            onClick={() => setShowSavePresetForm(false)}
+                            className="px-2.5 py-1 rounded bg-[#252525] hover:bg-[#323232] text-gray-300 text-[11px]"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={handleSaveCustomPreset}
+                            disabled={!newPresetName.trim()}
+                            className="px-3 py-1 rounded bg-[#ff7700] hover:bg-[#ff8c1a] disabled:opacity-40 text-black font-semibold text-[11px] whitespace-nowrap"
+                          >
+                            Save
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Active Sidecar Parameter Editor */}
+                    <div className="p-2.5 rounded bg-[#141414] border border-[#2a2a2a] flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex flex-wrap items-center gap-3 text-[11px]">
+                        <label className="flex items-center gap-1.5 text-gray-400">
+                          <span>Start TC:</span>
+                          <select
+                            value={exportConfig.timecodeStart}
+                            onChange={(e) =>
+                              updateExportConfig({
+                                timecodeStart: e.target.value as '00:00:00:00' | '01:00:00:00',
+                              })
+                            }
+                            className="bg-[#1e1e1e] border border-[#3a3a3a] rounded px-2 py-0.5 font-mono text-gray-200 focus:outline-none focus:border-[#ff8000]"
+                          >
+                            <option value="00:00:00:00">00:00:00:00</option>
+                            <option value="01:00:00:00">01:00:00:00 (Hour 1)</option>
+                          </select>
+                        </label>
+
+                        <label className="flex items-center gap-1.5 text-gray-400">
+                          <span>Marker Colors:</span>
+                          <select
+                            value={exportConfig.markerColorProfile}
+                            onChange={(e) =>
+                              updateExportConfig({
+                                markerColorProfile: e.target.value as 'premiere' | 'resolve' | 'avid',
+                              })
+                            }
+                            className="bg-[#1e1e1e] border border-[#3a3a3a] rounded px-2 py-0.5 text-gray-200 focus:outline-none focus:border-[#ff8000]"
+                          >
+                            <option value="premiere">Premiere (Orange / Cyan)</option>
+                            <option value="resolve">Resolve (Blue / Emerald)</option>
+                            <option value="avid">Avid (Yellow / Violet)</option>
+                          </select>
+                        </label>
+
+                        <label className="flex items-center gap-1.5 text-gray-400">
+                          <span>Suffix:</span>
+                          <input
+                            type="text"
+                            value={exportConfig.filenameSuffix}
+                            onChange={(e) =>
+                              updateExportConfig({ filenameSuffix: e.target.value })
+                            }
+                            className="w-24 bg-[#1e1e1e] border border-[#3a3a3a] rounded px-2 py-0.5 font-mono text-gray-200 focus:outline-none focus:border-[#ff8000]"
+                          />
+                        </label>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-3 text-[11px]">
+                        {(
+                          [
+                            ['includeSceneMarkers', 'Scene Markers'],
+                            ['includeDialogueCues', 'Dialogue Cues'],
+                            ['includeCameraMetadata', 'Camera Shots'],
+                            ['includePropAndTagMetadata', 'Props & Tags'],
+                            ['includeAlignedTakes', 'STT Takes'],
+                            ['includeTranscriptTokens', 'STT Tokens'],
+                          ] as const
+                        ).map(([key, label]) => (
+                          <label
+                            key={key}
+                            className="flex items-center gap-1.5 cursor-pointer text-gray-300 select-none"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={exportConfig[key]}
+                              onChange={(e) =>
+                                updateExportConfig({ [key]: e.target.checked })
+                              }
+                              className="accent-[#ff7700] rounded"
+                            />
+                            <span>{label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Mapping Overview Strip */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 flex-shrink-0">
                 <div className="bg-[#191919] border border-[#343434] rounded p-3 space-y-1">
@@ -676,7 +1085,7 @@ export const NLEMetadataModal: React.FC<NLEMetadataModalProps> = ({
                     01. Scene & Camera Markers
                   </div>
                   <p className="text-[11px] text-gray-400 leading-relaxed">
-                    Scene headings, cast lists, props, and camera shot directions map to Premiere Pro timeline <code className="text-gray-200">&lt;marker&gt;</code> blocks at <span className="font-mono tabular-nums">{frameRate} fps</span>.
+                    Scene headings, cast lists, props, and camera shot directions map to NLE timeline <code className="text-gray-200">&lt;marker&gt;</code> blocks at <span className="font-mono tabular-nums">{frameRate} fps</span> (<span className="font-mono text-gray-300">{exportConfig.timecodeStart}</span>).
                   </p>
                 </div>
                 <div className="bg-[#191919] border border-[#343434] rounded p-3 space-y-1">
@@ -701,7 +1110,10 @@ export const NLEMetadataModal: React.FC<NLEMetadataModalProps> = ({
               <div className="flex items-center justify-between gap-3 flex-shrink-0">
                 <div className="flex items-center p-0.5 bg-[#161616] rounded border border-[#363636]">
                   <button
-                    onClick={() => setPreviewFormat('xml')}
+                    onClick={() => {
+                      setPreviewFormat('xml');
+                      setExportConfig((prev) => ({ ...prev, preferredFormat: 'xml' }));
+                    }}
                     className={`px-3 py-1 rounded text-xs transition-colors whitespace-nowrap shrink-0 ${
                       previewFormat === 'xml'
                         ? 'bg-[#2c2c2c] text-amber-300 font-semibold'
@@ -711,7 +1123,10 @@ export const NLEMetadataModal: React.FC<NLEMetadataModalProps> = ({
                     Premiere Pro XMEML v4 (.xml)
                   </button>
                   <button
-                    onClick={() => setPreviewFormat('json')}
+                    onClick={() => {
+                      setPreviewFormat('json');
+                      setExportConfig((prev) => ({ ...prev, preferredFormat: 'json' }));
+                    }}
                     className={`px-3 py-1 rounded text-xs transition-colors whitespace-nowrap shrink-0 ${
                       previewFormat === 'json'
                         ? 'bg-[#2c2c2c] text-cyan-300 font-semibold'
@@ -744,25 +1159,25 @@ export const NLEMetadataModal: React.FC<NLEMetadataModalProps> = ({
                   <button
                     onClick={() =>
                       requestNLEExport(
-                        'Premiere XML',
+                        `${exportConfig.nleTarget} XML`,
                         'premiere_xml',
                         xmlOutput,
-                        `${baseSlug}_premiere_sequence.xml`,
+                        `${baseSlug}${fileSuffix}_sequence.xml`,
                         'application/xml'
                       )
                     }
                     className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#ff7700] hover:bg-[#ff8c1a] text-black font-semibold rounded whitespace-nowrap shrink-0"
                   >
                     <Download className="w-3.5 h-3.5" />
-                    <span>Export Premiere XML</span>
+                    <span>Export NLE XML</span>
                   </button>
                   <button
                     onClick={() =>
                       requestNLEExport(
-                        'JSON Sidecar',
+                        `${exportConfig.nleTarget} JSON`,
                         'nle_json',
                         jsonOutput,
-                        `${baseSlug}.nle.json`,
+                        `${baseSlug}${fileSuffix}.nle.json`,
                         'application/json'
                       )
                     }
@@ -896,6 +1311,46 @@ export const NLEMetadataModal: React.FC<NLEMetadataModalProps> = ({
                 </div>
               </div>
 
+              {/* Schedule Cross-Reference Conflict Banner */}
+              {charCrossRef.conflicts.length > 0 && (
+                <div className="px-5 py-2.5 bg-[#2a171b] border-b border-rose-800/60 flex flex-wrap items-center justify-between gap-2 flex-shrink-0">
+                  <div className="flex items-start gap-2 min-w-0">
+                    <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                    <div className="min-w-0 space-y-1">
+                      <div className="text-[11px] font-semibold text-rose-200">
+                        Character Presence Schedule Conflict: {charCrossRef.conflicts.length} simultaneous two-location booking
+                        {charCrossRef.conflicts.length === 1 ? '' : 's'} detected in Production Schedule
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {charCrossRef.conflicts.map((cf) => (
+                          <button
+                            key={cf.id}
+                            onClick={() => {
+                              const hasSceneA = (metadataDoc.dialogueIndex.byScene[cf.slotA.sceneId] || []).length > 0;
+                              const hasSceneB = (metadataDoc.dialogueIndex.byScene[cf.slotB.sceneId] || []).length > 0;
+                              const hasSpeaker = (metadataDoc.dialogueIndex.bySpeaker[cf.characterName] || []).length > 0;
+                              setSceneFilter(hasSceneA ? cf.slotA.sceneId : hasSceneB ? cf.slotB.sceneId : 'all');
+                              setSpeakerFilter(hasSpeaker ? cf.characterName : 'all');
+                            }}
+                            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-xs bg-[#1b1114] hover:bg-[#361c22] border border-rose-700/60 text-[10px] text-rose-200 transition-colors"
+                            title={cf.reason}
+                          >
+                            <span
+                              className="w-2.5 h-2.5 rounded-[2px] shrink-0"
+                              style={{ backgroundColor: cf.color }}
+                            />
+                            <span className="font-semibold">{cf.characterName}</span>
+                            <span className="text-rose-300/80 font-mono">
+                              Sc. {cf.slotA.sceneNumber} ({cf.slotA.location}) vs Sc. {cf.slotB.sceneNumber} ({cf.slotB.location}) · {cf.shootDayLabel}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Master-Detail Split View */}
               <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 min-h-0 divide-y lg:divide-y-0 lg:divide-x divide-[#343434]">
                 {/* Left Results List */}
@@ -914,6 +1369,18 @@ export const NLEMetadataModal: React.FC<NLEMetadataModalProps> = ({
                       const { entry } = res;
                       const isSelected = selectedResult?.entry.lineKey === entry.lineKey;
                       const matchedTakes = alignedByLineKey.get(entry.lineKey) || [];
+                      const sceneConflicts = charCrossRef.conflictsBySceneId[entry.sceneId] || [];
+                      const speakerConflicts =
+                        charCrossRef.conflictsByCharacter[entry.speaker.toUpperCase()]?.filter(
+                          (c) =>
+                            c.slotA.sceneId === entry.sceneId || c.slotB.sceneId === entry.sceneId
+                        ) || [];
+                      const sceneSlot = charCrossRef.sceneSlotsBySceneId[entry.sceneId];
+                      const sceneCast =
+                        res.sceneContext.cast.length > 0
+                          ? res.sceneContext.cast
+                          : [entry.speaker];
+
                       return (
                         <div
                           key={entry.lineKey}
@@ -929,6 +1396,19 @@ export const NLEMetadataModal: React.FC<NLEMetadataModalProps> = ({
                               <span className="font-mono font-bold text-amber-400 whitespace-nowrap">
                                 {entry.lineKey}
                               </span>
+                              <span
+                                className={`w-2.5 h-2.5 rounded-[2px] shrink-0 ${
+                                  speakerConflicts.length > 0
+                                    ? 'ring-2 ring-rose-500 ring-offset-1 ring-offset-[#181818]'
+                                    : ''
+                                }`}
+                                style={{ backgroundColor: getCharColor(entry.speaker) }}
+                                title={
+                                  speakerConflicts.length > 0
+                                    ? speakerConflicts[0].reason
+                                    : `${entry.speaker} presence indicator`
+                                }
+                              />
                               <span className="font-semibold text-gray-100 whitespace-nowrap">
                                 {entry.speaker}
                               </span>
@@ -938,6 +1418,15 @@ export const NLEMetadataModal: React.FC<NLEMetadataModalProps> = ({
                             </div>
 
                             <div className="flex items-center gap-2 shrink-0 font-mono text-[11px] tabular-nums">
+                              {sceneConflicts.length > 0 && (
+                                <span
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-xs bg-rose-950/80 border border-rose-600/70 text-rose-300 text-[10px] font-sans font-semibold"
+                                  title={sceneConflicts.map((c) => c.reason).join(' | ')}
+                                >
+                                  <AlertTriangle className="w-2.5 h-2.5 text-rose-400" />
+                                  <span>2-Loc Conflict</span>
+                                </span>
+                              )}
                               {matchedTakes.length > 0 && (
                                 <span className="px-1.5 py-0.5 rounded-xs bg-emerald-950/70 border border-emerald-700/50 text-emerald-300 text-[10px]">
                                   {matchedTakes.length} take{matchedTakes.length > 1 ? 's' : ''}
@@ -969,13 +1458,52 @@ export const NLEMetadataModal: React.FC<NLEMetadataModalProps> = ({
                             "{renderHighlightedText(entry.exactText, dialogueQuery)}"
                           </p>
 
-                          <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] font-mono text-gray-500 tabular-nums">
-                            <span>elem: {entry.elementId}</span>
-                            <span>scene: {entry.sceneId}</span>
-                            <span>
-                              frames: {res.startFrame}–{res.endFrame}
-                            </span>
-                            <span>{entry.wordCount} words</span>
+                          <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono text-gray-500 tabular-nums">
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                              <span>elem: {entry.elementId}</span>
+                              <span>scene: {entry.sceneId}</span>
+                              <span>
+                                frames: {res.startFrame}–{res.endFrame}
+                              </span>
+                              {sceneSlot && (
+                                <span className="text-gray-400">
+                                  {sceneSlot.shootDayLabel} · {sceneSlot.timeWindowLabel}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Scene Cast Presence Squares */}
+                            <div
+                              className="flex items-center gap-1"
+                              title="Scene character presence indicators (rose ring = simultaneous 2-location schedule conflict)"
+                            >
+                              {sceneCast.map((castName) => {
+                                const norm = castName.trim().toUpperCase();
+                                const hasConflict = (
+                                  charCrossRef.conflictsByCharacter[norm] || []
+                                ).some(
+                                  (c) =>
+                                    c.slotA.sceneId === entry.sceneId ||
+                                    c.slotB.sceneId === entry.sceneId
+                                );
+                                return (
+                                  <span
+                                    key={norm}
+                                    className={`w-2.5 h-2.5 rounded-[2px] ${
+                                      hasConflict
+                                        ? 'ring-2 ring-rose-500 animate-pulse'
+                                        : 'opacity-85'
+                                    }`}
+                                    style={{ backgroundColor: getCharColor(norm) }}
+                                    title={
+                                      hasConflict
+                                        ? `${norm} — SCHEDULE CONFLICT: simultaneous two-location booking`
+                                        : `${norm} present in Sc. ${entry.sceneNumber}`
+                                    }
+                                  />
+                                );
+                              })}
+                            </div>
                           </div>
                         </div>
                       );
@@ -1121,13 +1649,21 @@ export const NLEMetadataModal: React.FC<NLEMetadataModalProps> = ({
                         </div>
                       </div>
 
-                      {/* Precise Scene Context */}
-                      <div className="bg-[#151515] border border-[#323232] rounded p-3 space-y-2">
-                        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-200">
-                          <MapPin className="w-3.5 h-3.5 text-cyan-400" />
-                          <span>Scene Context & Production Metadata</span>
+                      {/* Precise Scene Context & Character Presence Schedule Cross-Reference */}
+                      <div className="bg-[#151515] border border-[#323232] rounded p-3 space-y-2.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-200">
+                            <MapPin className="w-3.5 h-3.5 text-cyan-400" />
+                            <span>Scene Context & Schedule Cross-Reference</span>
+                          </div>
+                          {charCrossRef.sceneSlotsBySceneId[selectedResult.entry.sceneId] && (
+                            <span className="font-mono text-[10px] text-amber-300 bg-[#221d16] border border-amber-800/50 px-1.5 py-0.5 rounded-xs">
+                              {charCrossRef.sceneSlotsBySceneId[selectedResult.entry.sceneId].shootDayLabel} ·{' '}
+                              {charCrossRef.sceneSlotsBySceneId[selectedResult.entry.sceneId].timeWindowLabel}
+                            </span>
+                          )}
                         </div>
-                        <div className="text-[11px] space-y-1.5 text-gray-300">
+                        <div className="text-[11px] space-y-2 text-gray-300">
                           <div className="flex items-center justify-between gap-2">
                             <span className="font-semibold text-gray-100 truncate">
                               Sc. {selectedResult.sceneContext.sceneNumber}: {selectedResult.sceneContext.slugline}
@@ -1136,9 +1672,96 @@ export const NLEMetadataModal: React.FC<NLEMetadataModalProps> = ({
                               {selectedResult.sceneContext.timecodeIn}–{selectedResult.sceneContext.timecodeOut}
                             </span>
                           </div>
-                          <div className="text-[11px] text-gray-400">
-                            Cast in Scene: <span className="text-gray-200">{selectedResult.sceneContext.cast.join(', ') || selectedResult.entry.speaker}</span>
+
+                          {charCrossRef.sceneSlotsBySceneId[selectedResult.entry.sceneId] ? (
+                            <div className="text-[11px] text-gray-400">
+                              Scheduled Location:{' '}
+                              <span className="text-cyan-300 font-medium">
+                                {charCrossRef.sceneSlotsBySceneId[selectedResult.entry.sceneId].location}
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="text-[11px] text-gray-500">
+                              Not yet placed on a Production Schedule shooting day.
+                            </div>
+                          )}
+
+                          {/* Color-Coded Character Presence Indicators */}
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1.5 text-[10px] text-gray-400">
+                              <Users className="w-3 h-3 text-gray-400" />
+                              <span>Character Presence Indicators (Schedule Checked):</span>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {(selectedResult.sceneContext.cast.length > 0
+                                ? selectedResult.sceneContext.cast
+                                : [selectedResult.entry.speaker]
+                              ).map((charName) => {
+                                const norm = charName.trim().toUpperCase();
+                                const charConflicts = (
+                                  charCrossRef.conflictsByCharacter[norm] || []
+                                ).filter(
+                                  (c) =>
+                                    c.slotA.sceneId === selectedResult.entry.sceneId ||
+                                    c.slotB.sceneId === selectedResult.entry.sceneId
+                                );
+                                const hasConflict = charConflicts.length > 0;
+                                return (
+                                  <span
+                                    key={norm}
+                                    className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-xs border text-[10px] font-medium ${
+                                      hasConflict
+                                        ? 'bg-rose-950/70 border-rose-600/80 text-rose-200'
+                                        : 'bg-[#1d1d1d] border-[#343434] text-gray-200'
+                                    }`}
+                                    title={
+                                      hasConflict
+                                        ? charConflicts[0].reason
+                                        : `${norm} has no overlapping location bookings on this shoot day`
+                                    }
+                                  >
+                                    <span
+                                      className="w-2.5 h-2.5 rounded-[2px] shrink-0"
+                                      style={{ backgroundColor: getCharColor(norm) }}
+                                    />
+                                    <span>{norm}</span>
+                                    {hasConflict && (
+                                      <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" />
+                                    )}
+                                  </span>
+                                );
+                              })}
+                            </div>
                           </div>
+
+                          {/* Simultaneous Two-Location Conflict Details for Selected Scene */}
+                          {(charCrossRef.conflictsBySceneId[selectedResult.entry.sceneId] || []).length > 0 && (
+                            <div className="p-2 rounded bg-[#2a1519] border border-rose-700/70 space-y-1.5">
+                              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-rose-300">
+                                <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                                <span>Simultaneous Two-Location Schedule Conflict</span>
+                              </div>
+                              {(charCrossRef.conflictsBySceneId[selectedResult.entry.sceneId] || []).map((cf) => {
+                                const otherSlot =
+                                  cf.slotA.sceneId === selectedResult.entry.sceneId ? cf.slotB : cf.slotA;
+                                return (
+                                  <div
+                                    key={cf.id}
+                                    className="text-[11px] text-rose-200/90 leading-snug flex items-start justify-between gap-2"
+                                  >
+                                    <span>{cf.reason}</span>
+                                    <button
+                                      onClick={() => setSceneFilter(otherSlot.sceneId)}
+                                      className="px-1.5 py-0.5 rounded bg-rose-900/60 hover:bg-rose-800 border border-rose-600/60 text-[10px] text-white whitespace-nowrap shrink-0"
+                                    >
+                                      View Sc. {otherSlot.sceneNumber}
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+
                           {selectedResult.sceneContext.props.length > 0 && (
                             <div className="text-[11px] text-gray-400">
                               Props Tagged: <span className="text-amber-300">{selectedResult.sceneContext.props.join(', ')}</span>
@@ -1296,17 +1919,17 @@ export const NLEMetadataModal: React.FC<NLEMetadataModalProps> = ({
                   <button
                     onClick={() =>
                       requestNLEExport(
-                        'Aligned Premiere XML',
+                        `Aligned ${exportConfig.nleTarget} XML`,
                         'aligned_premiere_xml',
-                        exportPremiereProXML(project, frameRate, alignedMatches),
-                        `${baseSlug}_aligned_takes_premiere.xml`,
+                        exportPremiereProXML(project, frameRate, alignedMatches, exportConfig),
+                        `${baseSlug}${fileSuffix}_aligned_takes.xml`,
                         'application/xml'
                       )
                     }
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-[#ff7700] hover:bg-[#ff8c1a] text-black font-semibold rounded whitespace-nowrap shrink-0"
                   >
                     <Download className="w-3.5 h-3.5" />
-                    <span>Export Aligned Premiere XML</span>
+                    <span>Export Aligned NLE XML</span>
                   </button>
                 </div>
 
