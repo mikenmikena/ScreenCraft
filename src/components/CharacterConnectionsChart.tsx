@@ -6,8 +6,6 @@ import {
 } from '../types/story';
 import {
   buildCharacterConnectionsGraph,
-  CANVAS_LOGICAL_HEIGHT,
-  CANVAS_LOGICAL_WIDTH,
   canonicalPairKey,
   CharacterConnectionEdgeModel,
   CharacterGraphNode,
@@ -46,6 +44,7 @@ interface CharacterConnectionsChartProps {
   project: StoryProject;
   onUpdateRelationships: (relationships: CharacterRelationshipEdge[]) => void;
   onUpdateNodePositions: (positions: Record<string, { x: number; y: number }>) => void;
+  onUpdateEdgePositions?: (positions: Record<string, { x: number; y: number }>) => void;
   onSelectScene: (sceneId: string) => void;
   onOpenCharacterBios?: () => void;
 }
@@ -90,12 +89,21 @@ export const CharacterConnectionsChart: React.FC<CharacterConnectionsChartProps>
   project,
   onUpdateRelationships,
   onUpdateNodePositions,
+  onUpdateEdgePositions,
   onSelectScene,
   onOpenCharacterBios,
 }) => {
   const [sceneFilterId, setSceneFilterId] = useState<string>('all');
   const [polarityFilter, setPolarityFilter] = useState<PolarityFilter>('all');
-  const [zoom, setZoom] = useState<number>(100);
+  const [viewport, setViewport] = useState<{ panX: number; panY: number; scale: number }>({
+    panX: 0,
+    panY: 0,
+    scale: 1,
+  });
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const scaleRef = useRef<number>(1);
+  scaleRef.current = viewport.scale;
+
   const [selectedNodeName, setSelectedNodeName] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [linkingFromNode, setLinkingFromNode] = useState<string | null>(null);
@@ -111,8 +119,14 @@ export const CharacterConnectionsChart: React.FC<CharacterConnectionsChartProps>
   const [newLabel, setNewLabel] = useState('');
   const [newStoryDriver, setNewStoryDriver] = useState('');
 
-  // Smooth local drag overrides before committing on pointerup
+  // Smooth local drag overrides before committing on pointerup (nodes + edge descriptors + canvas pan)
   const [dragOverrides, setDragOverrides] = useState<Record<string, { x: number; y: number }>>({});
+  const [edgeDragOverrides, setEdgeDragOverrides] = useState<
+    Record<string, { x: number; y: number }>
+  >({});
+  const [localEdgePositions, setLocalEdgePositions] = useState<
+    Record<string, { x: number; y: number }>
+  >({});
   const dragStateRef = useRef<{
     name: string;
     startClientX: number;
@@ -121,6 +135,24 @@ export const CharacterConnectionsChart: React.FC<CharacterConnectionsChartProps>
     originY: number;
     moved: boolean;
   } | null>(null);
+  const edgeDragStateRef = useRef<{
+    pairKey: string;
+    startClientX: number;
+    startClientY: number;
+    originX: number;
+    originY: number;
+    moved: boolean;
+  } | null>(null);
+  const panStateRef = useRef<{
+    startClientX: number;
+    startClientY: number;
+    originPanX: number;
+    originPanY: number;
+    moved: boolean;
+  } | null>(null);
+  const suppressEdgeClickPairRef = useRef<string | null>(null);
+  const suppressNodeClickNameRef = useRef<string | null>(null);
+  const suppressCanvasClickRef = useRef<boolean>(false);
 
   const graph = useMemo(
     () => buildCharacterConnectionsGraph(project, sceneFilterId),
@@ -170,48 +202,135 @@ export const CharacterConnectionsChart: React.FC<CharacterConnectionsChartProps>
     return () => window.removeEventListener('keydown', handleKey);
   }, [linkingFromNode]);
 
-  // Global pointer drag handling for node repositioning
+  const effectiveSavedEdgePositions = project.characterEdgePositions || localEdgePositions;
+
+  // Smooth mouse-wheel / trackpad zoom centered at cursor position (20% - 250%)
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      const cursorX = e.clientX - rect.left;
+      const cursorY = e.clientY - rect.top;
+      const factor = e.deltaY < 0 ? 1.1 : 0.9;
+
+      setViewport((prev) => {
+        const nextScale = Math.min(2.5, Math.max(0.2, prev.scale * factor));
+        const worldX = (cursorX - prev.panX) / prev.scale;
+        const worldY = (cursorY - prev.panY) / prev.scale;
+        return {
+          scale: nextScale,
+          panX: cursorX - worldX * nextScale,
+          panY: cursorY - worldY * nextScale,
+        };
+      });
+    };
+
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheel);
+  }, []);
+
+  // Global pointer drag handling for infinite node, edge descriptor, and canvas pan repositioning
   useEffect(() => {
     const handlePointerMove = (e: PointerEvent) => {
+      const currentScale = scaleRef.current || 1;
+
       const drag = dragStateRef.current;
-      if (!drag) return;
-      const scale = zoom / 100;
-      const dx = (e.clientX - drag.startClientX) / scale;
-      const dy = (e.clientY - drag.startClientY) / scale;
-      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
-        drag.moved = true;
+      if (drag) {
+        const dx = (e.clientX - drag.startClientX) / currentScale;
+        const dy = (e.clientY - drag.startClientY) / currentScale;
+        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+          drag.moved = true;
+        }
+        const nextX = Math.round(drag.originX + dx);
+        const nextY = Math.round(drag.originY + dy);
+        setDragOverrides((prev) => ({
+          ...prev,
+          [drag.name]: { x: nextX, y: nextY },
+        }));
       }
-      const nextX = Math.max(
-        16,
-        Math.min(CANVAS_LOGICAL_WIDTH - NODE_CARD_WIDTH - 16, Math.round(drag.originX + dx))
-      );
-      const nextY = Math.max(
-        16,
-        Math.min(CANVAS_LOGICAL_HEIGHT - NODE_CARD_HEIGHT - 16, Math.round(drag.originY + dy))
-      );
-      setDragOverrides((prev) => ({
-        ...prev,
-        [drag.name]: { x: nextX, y: nextY },
-      }));
+
+      const edgeDrag = edgeDragStateRef.current;
+      if (edgeDrag) {
+        const dx = (e.clientX - edgeDrag.startClientX) / currentScale;
+        const dy = (e.clientY - edgeDrag.startClientY) / currentScale;
+        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+          edgeDrag.moved = true;
+        }
+        const nextX = Math.round(edgeDrag.originX + dx);
+        const nextY = Math.round(edgeDrag.originY + dy);
+        setEdgeDragOverrides((prev) => ({
+          ...prev,
+          [edgeDrag.pairKey]: { x: nextX, y: nextY },
+        }));
+      }
+
+      const pan = panStateRef.current;
+      if (pan) {
+        const dx = e.clientX - pan.startClientX;
+        const dy = e.clientY - pan.startClientY;
+        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+          pan.moved = true;
+        }
+        setViewport((prev) => ({
+          ...prev,
+          panX: pan.originPanX + dx,
+          panY: pan.originPanY + dy,
+        }));
+      }
     };
 
     const handlePointerUp = () => {
       const drag = dragStateRef.current;
-      if (!drag) return;
-      dragStateRef.current = null;
-      if (drag.moved) {
-        setDragOverrides((current) => {
-          const finalPos = current[drag.name];
-          if (finalPos) {
-            onUpdateNodePositions({
-              ...(project.characterNodePositions || {}),
-              ...current,
-            });
-          }
-          return {};
-        });
-      } else {
-        setDragOverrides({});
+      if (drag) {
+        dragStateRef.current = null;
+        if (drag.moved) {
+          suppressNodeClickNameRef.current = drag.name;
+          setDragOverrides((current) => {
+            const finalPos = current[drag.name];
+            if (finalPos) {
+              onUpdateNodePositions({
+                ...(project.characterNodePositions || {}),
+                ...current,
+              });
+            }
+            return {};
+          });
+        } else {
+          setDragOverrides({});
+        }
+      }
+
+      const edgeDrag = edgeDragStateRef.current;
+      if (edgeDrag) {
+        edgeDragStateRef.current = null;
+        if (edgeDrag.moved) {
+          suppressEdgeClickPairRef.current = edgeDrag.pairKey;
+          setEdgeDragOverrides((current) => {
+            const finalPos = current[edgeDrag.pairKey];
+            if (finalPos) {
+              const merged = {
+                ...(project.characterEdgePositions || localEdgePositions),
+                ...current,
+              };
+              setLocalEdgePositions(merged);
+              onUpdateEdgePositions?.(merged);
+            }
+            return {};
+          });
+        } else {
+          setEdgeDragOverrides({});
+        }
+      }
+
+      const pan = panStateRef.current;
+      if (pan) {
+        panStateRef.current = null;
+        if (pan.moved) {
+          suppressCanvasClickRef.current = true;
+        }
       }
     };
 
@@ -221,7 +340,13 @@ export const CharacterConnectionsChart: React.FC<CharacterConnectionsChartProps>
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
     };
-  }, [zoom, onUpdateNodePositions, project.characterNodePositions]);
+  }, [
+    onUpdateNodePositions,
+    onUpdateEdgePositions,
+    project.characterNodePositions,
+    project.characterEdgePositions,
+    localEdgePositions,
+  ]);
 
   // Persist or promote an edge update
   const upsertEdge = (
@@ -324,7 +449,65 @@ export const CharacterConnectionsChart: React.FC<CharacterConnectionsChartProps>
     const names = graph.nodes.map((n) => n.name);
     const arranged = computeRadialNodePositions(names);
     setDragOverrides({});
+    setEdgeDragOverrides({});
+    setLocalEdgePositions({});
     onUpdateNodePositions(arranged);
+    onUpdateEdgePositions?.({});
+    setViewport({ panX: 0, panY: 0, scale: 1 });
+  };
+
+  const zoomAtCenter = (factor: number) => {
+    const rect = viewportRef.current?.getBoundingClientRect();
+    const cx = rect ? rect.width / 2 : 420;
+    const cy = rect ? rect.height / 2 : 280;
+    setViewport((prev) => {
+      const nextScale = Math.min(2.5, Math.max(0.2, prev.scale * factor));
+      const worldX = (cx - prev.panX) / prev.scale;
+      const worldY = (cy - prev.panY) / prev.scale;
+      return {
+        scale: nextScale,
+        panX: cx - worldX * nextScale,
+        panY: cy - worldY * nextScale,
+      };
+    });
+  };
+
+  const handleFitView = () => {
+    if (displayNodes.length === 0) {
+      setViewport({ panX: 0, panY: 0, scale: 1 });
+      return;
+    }
+    const rect = viewportRef.current?.getBoundingClientRect();
+    const vw = rect?.width || 840;
+    const vh = rect?.height || 560;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    displayNodes.forEach((n) => {
+      minX = Math.min(minX, n.x);
+      minY = Math.min(minY, n.y);
+      maxX = Math.max(maxX, n.x + NODE_CARD_WIDTH);
+      maxY = Math.max(maxY, n.y + NODE_CARD_HEIGHT);
+    });
+    const padding = 64;
+    const contentW = Math.max(200, maxX - minX + padding * 2);
+    const contentH = Math.max(160, maxY - minY + padding * 2);
+    const nextScale = Math.min(1.5, Math.max(0.2, Math.min(vw / contentW, vh / contentH)));
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+    setViewport({
+      scale: nextScale,
+      panX: vw / 2 - centerX * nextScale,
+      panY: vh / 2 - centerY * nextScale,
+    });
+  };
+
+  const handleResetEdgeDescriptorPosition = (pairKey: string) => {
+    const next = { ...(project.characterEdgePositions || localEdgePositions) };
+    delete next[pairKey];
+    setLocalEdgePositions(next);
+    onUpdateEdgePositions?.(next);
   };
 
   const handleOpenAddModal = (prefillSource?: string) => {
@@ -403,7 +586,7 @@ export const CharacterConnectionsChart: React.FC<CharacterConnectionsChartProps>
     return { pathD, labelX, labelY };
   };
 
-  const scale = zoom / 100;
+  const zoomPercent = Math.round(viewport.scale * 100);
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-[#18181a] text-gray-200 text-xs select-none">
@@ -482,27 +665,36 @@ export const CharacterConnectionsChart: React.FC<CharacterConnectionsChartProps>
           <div className="flex items-center bg-[#161618] border border-[#3a3a40] rounded px-1 py-0.5 tabular-nums">
             <button
               type="button"
-              onClick={() => setZoom((z) => Math.max(60, z - 10))}
+              onClick={() => zoomAtCenter(0.85)}
               className="p-1 text-gray-400 hover:text-white"
-              title="Zoom out"
+              title="Zoom out (or scroll wheel down)"
             >
               <ZoomOut className="w-3.5 h-3.5" />
             </button>
             <button
               type="button"
-              onClick={() => setZoom(100)}
-              className="px-1.5 text-[11px] text-gray-300 font-mono hover:text-[#ff8000]"
-              title="Reset zoom to 100%"
+              onClick={() => setViewport({ panX: 0, panY: 0, scale: 1 })}
+              className="px-1.5 text-[11px] text-gray-300 font-mono hover:text-[#ff8000] min-w-[44px]"
+              title="Reset zoom to 100% & origin"
             >
-              {zoom}%
+              {zoomPercent}%
             </button>
             <button
               type="button"
-              onClick={() => setZoom((z) => Math.min(150, z + 10))}
+              onClick={() => zoomAtCenter(1.18)}
               className="p-1 text-gray-400 hover:text-white"
-              title="Zoom in"
+              title="Zoom in (or scroll wheel up)"
             >
               <ZoomIn className="w-3.5 h-3.5" />
+            </button>
+            <div className="w-px h-3.5 bg-[#33333a] mx-1" />
+            <button
+              type="button"
+              onClick={handleFitView}
+              className="px-1.5 py-0.5 text-[10px] font-semibold text-cyan-300 hover:text-white hover:bg-[#24242a] rounded"
+              title="Fit all character nodes into view"
+            >
+              Fit
             </button>
           </div>
         </div>
@@ -531,14 +723,35 @@ export const CharacterConnectionsChart: React.FC<CharacterConnectionsChartProps>
 
       {/* Main Split Workspace: Interactive Node Canvas + Story Cohesion Inspector */}
       <div className="flex-1 flex min-h-0 overflow-hidden">
-        {/* Left: Node-Based Canvas */}
+        {/* Left: Infinite Pan & Zoom Node-Based Canvas */}
         <div
-          className="flex-1 overflow-auto relative bg-[#121214]"
+          ref={viewportRef}
+          className="flex-1 overflow-hidden relative bg-[#121214] cursor-grab active:cursor-grabbing"
           style={{
             backgroundImage: 'radial-gradient(#27272c 1px, transparent 1px)',
-            backgroundSize: '20px 20px',
+            backgroundSize: `${Math.max(8, 22 * viewport.scale)}px ${Math.max(
+              8,
+              22 * viewport.scale
+            )}px`,
+            backgroundPosition: `${viewport.panX}px ${viewport.panY}px`,
+          }}
+          onPointerDown={(e) => {
+            // Pan when dragging empty canvas background or middle mouse button
+            if (e.button === 1 || e.target === e.currentTarget) {
+              panStateRef.current = {
+                startClientX: e.clientX,
+                startClientY: e.clientY,
+                originPanX: viewport.panX,
+                originPanY: viewport.panY,
+                moved: false,
+              };
+            }
           }}
           onClick={(e) => {
+            if (suppressCanvasClickRef.current) {
+              suppressCanvasClickRef.current = false;
+              return;
+            }
             if (e.target === e.currentTarget) {
               setSelectedEdgeId(null);
               setSelectedNodeName(null);
@@ -557,40 +770,17 @@ export const CharacterConnectionsChart: React.FC<CharacterConnectionsChartProps>
             </div>
           ) : (
             <div
-              className="relative"
+              className="absolute left-0 top-0 origin-top-left pointer-events-none"
               style={{
-                width: `${Math.round(CANVAS_LOGICAL_WIDTH * scale)}px`,
-                height: `${Math.round(CANVAS_LOGICAL_HEIGHT * scale)}px`,
-                minWidth: '100%',
-                minHeight: '100%',
-              }}
-              onClick={(e) => {
-                if (e.target === e.currentTarget) {
-                  setSelectedEdgeId(null);
-                  setSelectedNodeName(null);
-                }
+                transform: `translate(${viewport.panX}px, ${viewport.panY}px) scale(${viewport.scale})`,
               }}
             >
-              <div
-                className="relative origin-top-left"
-                style={{
-                  width: `${CANVAS_LOGICAL_WIDTH}px`,
-                  height: `${CANVAS_LOGICAL_HEIGHT}px`,
-                  transform: `scale(${scale})`,
-                }}
-                onClick={(e) => {
-                  if (e.target === e.currentTarget) {
-                    setSelectedEdgeId(null);
-                    setSelectedNodeName(null);
-                  }
-                }}
+              {/* Unclipped Infinite World SVG Edges Layer */}
+              <svg
+                width={1}
+                height={1}
+                className="absolute left-0 top-0 overflow-visible pointer-events-none"
               >
-                {/* SVG Edges Layer */}
-                <svg
-                  width={CANVAS_LOGICAL_WIDTH}
-                  height={CANVAS_LOGICAL_HEIGHT}
-                  className="absolute inset-0 pointer-events-none"
-                >
                   <defs>
                     {POLARITY_ORDER.map((pol) => (
                       <React.Fragment key={pol}>
@@ -635,6 +825,12 @@ export const CharacterConnectionsChart: React.FC<CharacterConnectionsChartProps>
                       ? 3.5
                       : Math.min(3.5, 1.8 + edge.sharedScenes.length * 0.35);
 
+                    const customDescPos =
+                      edgeDragOverrides[edge.pairKey] || effectiveSavedEdgePositions[edge.pairKey];
+                    const descX = customDescPos ? customDescPos.x : geom.labelX;
+                    const descY = customDescPos ? customDescPos.y : geom.labelY;
+                    const leaderDist = Math.hypot(descX - geom.labelX, descY - geom.labelY);
+
                     return (
                       <g
                         key={edge.id}
@@ -671,12 +867,34 @@ export const CharacterConnectionsChart: React.FC<CharacterConnectionsChartProps>
                               : undefined
                           }
                         />
+                        {/* Subtle leader tether when relationship descriptor is repositioned */}
+                        {leaderDist > 14 && (
+                          <>
+                            <line
+                              x1={geom.labelX}
+                              y1={geom.labelY}
+                              x2={descX}
+                              y2={descY}
+                              stroke={isSelected ? '#ff8000' : meta.stroke}
+                              strokeWidth={1.25}
+                              strokeDasharray="3 3"
+                              opacity={0.75}
+                            />
+                            <circle
+                              cx={geom.labelX}
+                              cy={geom.labelY}
+                              r={3}
+                              fill={isSelected ? '#ff8000' : meta.stroke}
+                              opacity={0.85}
+                            />
+                          </>
+                        )}
                       </g>
                     );
                   })}
                 </svg>
 
-                {/* Edge Midpoint Labels */}
+                {/* Draggable Edge Connection Descriptors */}
                 {filteredEdges.map((edge, idx) => {
                   const geom = getEdgeGeometry(edge, idx);
                   if (!geom) return null;
@@ -689,28 +907,48 @@ export const CharacterConnectionsChart: React.FC<CharacterConnectionsChartProps>
                   const dimmed =
                     (selectedNodeName && !isConnectedToSelectedNode) ||
                     (selectedEdge && !isSelected);
+                  const customDescPos =
+                    edgeDragOverrides[edge.pairKey] || effectiveSavedEdgePositions[edge.pairKey];
+                  const descX = customDescPos ? customDescPos.x : geom.labelX;
+                  const descY = customDescPos ? customDescPos.y : geom.labelY;
 
                   return (
                     <button
                       key={`lbl-${edge.id}`}
                       type="button"
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                        suppressEdgeClickPairRef.current = null;
+                        edgeDragStateRef.current = {
+                          pairKey: edge.pairKey,
+                          startClientX: e.clientX,
+                          startClientY: e.clientY,
+                          originX: descX,
+                          originY: descY,
+                          moved: false,
+                        };
+                      }}
                       onClick={(e) => {
                         e.stopPropagation();
+                        if (suppressEdgeClickPairRef.current === edge.pairKey) {
+                          suppressEdgeClickPairRef.current = null;
+                          return;
+                        }
                         setSelectedNodeName(null);
                         setSelectedEdgeId(edge.id);
                       }}
                       style={{
-                        left: `${geom.labelX}px`,
-                        top: `${geom.labelY}px`,
+                        left: `${descX}px`,
+                        top: `${descY}px`,
                         transform: 'translate(-50%, -50%)',
                         opacity: dimmed ? 0.3 : 1,
                       }}
-                      className={`absolute z-10 px-2 py-0.5 rounded border text-[10px] font-medium flex items-center gap-1 max-w-[165px] transition-all shadow-sm ${
+                      className={`pointer-events-auto absolute z-10 px-2 py-0.5 rounded border text-[10px] font-medium flex items-center gap-1 max-w-[180px] cursor-grab active:cursor-grabbing transition-shadow shadow-sm ${
                         isSelected
                           ? 'bg-[#2a1f14] border-[#ff8000] text-white scale-105'
                           : 'bg-[#18181b]/95 border-[#323238] text-gray-200 hover:border-gray-400'
                       }`}
-                      title={`${edge.sourceCharacter} ↔ ${edge.targetCharacter}: ${edge.label}`}
+                      title={`${edge.sourceCharacter} ↔ ${edge.targetCharacter}: ${edge.label} (Drag to reposition descriptor)`}
                     >
                       <span style={{ color: meta.stroke }} className="shrink-0">
                         {getPolarityIcon(edge.polarity, 'w-2.5 h-2.5')}
@@ -752,6 +990,8 @@ export const CharacterConnectionsChart: React.FC<CharacterConnectionsChartProps>
                         if ((e.target as HTMLElement).closest('[data-node-action="true"]')) {
                           return;
                         }
+                        e.stopPropagation();
+                        suppressNodeClickNameRef.current = null;
                         dragStateRef.current = {
                           name: node.name,
                           startClientX: e.clientX,
@@ -763,9 +1003,13 @@ export const CharacterConnectionsChart: React.FC<CharacterConnectionsChartProps>
                       }}
                       onClick={(e) => {
                         e.stopPropagation();
+                        if (suppressNodeClickNameRef.current === node.name) {
+                          suppressNodeClickNameRef.current = null;
+                          return;
+                        }
                         handleNodeClick(node);
                       }}
-                      className={`absolute z-20 rounded-md p-2.5 cursor-grab active:cursor-grabbing transition-shadow bg-[#1b1b1f] border ${
+                      className={`pointer-events-auto absolute z-20 rounded-md p-2.5 cursor-grab active:cursor-grabbing transition-shadow bg-[#1b1b1f] border ${
                         isLinkOrigin
                           ? 'border-[#ff8000] ring-2 ring-[#ff8000]/40 shadow-xl'
                           : isSelected || isLinkedToSelectedEdge
@@ -840,11 +1084,10 @@ export const CharacterConnectionsChart: React.FC<CharacterConnectionsChartProps>
                   );
                 })}
               </div>
-            </div>
           )}
 
           {/* Subtle Bottom-Left Legend Overlay */}
-          <div className="sticky bottom-3 left-3 ml-3 mb-3 inline-flex items-center gap-3 px-3 py-1.5 rounded bg-[#18181b]/95 border border-[#323238] text-[10px] text-gray-400 pointer-events-auto z-30">
+          <div className="absolute bottom-3 left-3 inline-flex items-center gap-3 px-3 py-1.5 rounded bg-[#18181b]/95 border border-[#323238] text-[10px] text-gray-400 pointer-events-auto z-30">
             <span className="flex items-center gap-1.5">
               <span className="w-4 h-0.5 bg-emerald-400 inline-block" />
               <span>Defined Dynamic</span>
@@ -853,7 +1096,9 @@ export const CharacterConnectionsChart: React.FC<CharacterConnectionsChartProps>
               <span className="w-4 border-t border-dashed border-zinc-400 inline-block" />
               <span>Script Co-Presence</span>
             </span>
-            <span className="text-gray-500">· Drag nodes to arrange · Click link to edit cohesion</span>
+            <span className="text-gray-500">
+              · Drag nodes or labels anywhere · Drag background to pan · Scroll to zoom
+            </span>
           </div>
         </div>
 
@@ -1012,7 +1257,7 @@ export const CharacterConnectionsChart: React.FC<CharacterConnectionsChartProps>
                     />
                   </div>
 
-                  <div className="flex items-center justify-between pt-1">
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
                     {selectedEdge.isAuthored ? (
                       <button
                         type="button"
@@ -1038,6 +1283,17 @@ export const CharacterConnectionsChart: React.FC<CharacterConnectionsChartProps>
                       >
                         <Sparkles className="w-3 h-3" />
                         <span>Promote to Story Link</span>
+                      </button>
+                    )}
+                    {effectiveSavedEdgePositions[selectedEdge.pairKey] && (
+                      <button
+                        type="button"
+                        onClick={() => handleResetEdgeDescriptorPosition(selectedEdge.pairKey)}
+                        className="flex items-center gap-1 px-2 py-1 bg-[#24242a] hover:bg-[#303038] border border-[#3a3a44] text-gray-300 rounded text-[10px]"
+                        title="Snap descriptor back to curve midpoint"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        <span>Reset Label Pos</span>
                       </button>
                     )}
                   </div>

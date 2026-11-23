@@ -14,8 +14,6 @@ import {
   FileSpreadsheet,
   MessageSquare,
   Tag as TagIcon,
-  ChevronDown,
-  Check,
   FolderOpen,
   Camera,
   Users,
@@ -26,21 +24,39 @@ import {
   MonitorPlay,
   ShieldAlert,
   HelpCircle,
-  Keyboard
+  Keyboard,
+  FilePlus2,
+  Eye,
+  XCircle,
+  BookmarkPlus,
+  Film,
+  Theater,
+  Tv,
+  ChevronRight,
+  ListTree,
+  GitPullRequest,
+  Settings,
 } from 'lucide-react';
-import { ActiveWorkspace, ElementType, StoryProject } from '../types/story';
+import { ActiveWorkspace, ElementType } from '../types/story';
+import { DocumentTemplateKind } from '../utils/projectTemplates';
 import { HelpSectionCategory } from './HelpGuideModal';
 
 interface MenuBarProps {
   activeWorkspace: ActiveWorkspace;
   onSelectWorkspace: (workspace: ActiveWorkspace) => void;
-  onExport: (format: 'pdf' | 'fdx' | 'fountain' | 'json' | 'csv' | 'rust_zip') => void;
-  onImport: () => void;
+  onExport: (format: 'pdf' | 'fdx' | 'fountain' | 'json' | 'csv') => void;
+  onNewDocument?: (kind?: DocumentTemplateKind) => void;
+  onOpenFromDevice?: () => void;
   onSave: () => void;
+  onSaveAs?: () => void;
+  onSaveAsTemplate?: () => void;
+  onPrintPreview?: () => void;
+  onPrint?: () => void;
+  onOpenPreferences?: () => void;
+  onCloseDocument?: () => void;
   onOpenReports: () => void;
   onAddElement: (type: ElementType) => void;
   onRecalculate: () => void;
-  onOpenSample: (sampleId: string) => void;
   onAddDayBreak?: () => void;
   onAddComment?: () => void;
   onOpenCastCrew?: () => void;
@@ -53,20 +69,24 @@ interface MenuBarProps {
   onOpenContinuityCheck?: () => void;
   continuityAlertCount?: number;
   onOpenHelpGuide?: (category?: HelpSectionCategory, toolId?: string) => void;
-  currentProject: StoryProject;
-  sampleProjects: StoryProject[];
 }
 
 export const MenuBar: React.FC<MenuBarProps> = ({
   activeWorkspace,
   onSelectWorkspace,
   onExport,
-  onImport,
+  onNewDocument,
+  onOpenFromDevice,
   onSave,
+  onSaveAs,
+  onSaveAsTemplate,
+  onPrintPreview,
+  onPrint,
+  onOpenPreferences,
+  onCloseDocument,
   onOpenReports,
   onAddElement,
   onRecalculate,
-  onOpenSample,
   onAddDayBreak,
   onAddComment,
   onOpenCastCrew,
@@ -79,16 +99,16 @@ export const MenuBar: React.FC<MenuBarProps> = ({
   onOpenContinuityCheck,
   continuityAlertCount = 0,
   onOpenHelpGuide,
-  currentProject,
-  sampleProjects,
 }) => {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const [fileSubmenu, setFileSubmenu] = useState<null | 'new' | 'export'>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setOpenMenu(null);
+        setFileSubmenu(null);
       }
     }
     document.addEventListener('mousedown', handleClickOutside);
@@ -96,7 +116,13 @@ export const MenuBar: React.FC<MenuBarProps> = ({
   }, []);
 
   const toggleMenu = (name: string) => {
+    setFileSubmenu(null);
     setOpenMenu(openMenu === name ? null : name);
+  };
+
+  const closeAllMenus = () => {
+    setOpenMenu(null);
+    setFileSubmenu(null);
   };
 
   return (
@@ -117,106 +143,289 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             File
           </button>
           {openMenu === 'file' && (
-            <div className="absolute left-0 top-full mt-1 w-60 bg-[#222222] border border-[#444444] rounded shadow-2xl py-1 z-50 text-gray-200">
-              <div className="px-3 py-1 text-[11px] font-semibold text-gray-400 border-b border-[#333333] uppercase tracking-wider">
-                Open Sample Project
-              </div>
-              {sampleProjects.map((p) => (
+            <div className="absolute left-0 top-full mt-1 w-64 bg-[#222222] border border-[#444444] rounded shadow-2xl py-1 z-50 text-gray-200">
+              {/* New (with template options) */}
+              <div
+                className="relative"
+                onMouseEnter={() => setFileSubmenu('new')}
+                onMouseLeave={() => setFileSubmenu((prev) => (prev === 'new' ? null : prev))}
+              >
                 <button
-                  key={p.id}
-                  onClick={() => {
-                    onOpenSample(p.id);
-                    setOpenMenu(null);
-                  }}
-                  className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center justify-between text-xs transition-colors"
+                  type="button"
+                  onClick={() => setFileSubmenu((prev) => (prev === 'new' ? null : 'new'))}
+                  className={`w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center justify-between transition-colors ${
+                    fileSubmenu === 'new' ? 'bg-[#333333] text-white' : ''
+                  }`}
                 >
-                  <span className="truncate">{p.title}</span>
-                  {currentProject.id === p.id && <Check className="w-3.5 h-3.5 text-emerald-400" />}
+                  <span className="flex items-center space-x-2">
+                    <FilePlus2 className="w-3.5 h-3.5 text-amber-300" />
+                    <span>New</span>
+                  </span>
+                  <ChevronRight className="w-3.5 h-3.5 text-gray-400" />
                 </button>
-              ))}
+
+                {fileSubmenu === 'new' && (
+                  <div className="absolute left-full top-0 ml-0.5 w-56 bg-[#222222] border border-[#444444] rounded shadow-2xl py-1 z-50 text-gray-200">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onNewDocument?.('film');
+                        closeAllMenus();
+                      }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 transition-colors"
+                    >
+                      <Film className="w-3.5 h-3.5 text-[#ff8000]" />
+                      <span>New Film Script</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onNewDocument?.('stage');
+                        closeAllMenus();
+                      }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 transition-colors"
+                    >
+                      <Theater className="w-3.5 h-3.5 text-amber-300" />
+                      <span>New Stage Play</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onNewDocument?.('book');
+                        closeAllMenus();
+                      }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 transition-colors"
+                    >
+                      <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>New Book Manuscript</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onNewDocument?.('television');
+                        closeAllMenus();
+                      }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 transition-colors"
+                    >
+                      <Tv className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>New Television Script</span>
+                    </button>
+                    <div className="h-px bg-[#333333] my-1"></div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onSelectWorkspace('projects');
+                        closeAllMenus();
+                      }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 transition-colors"
+                    >
+                      <Layout className="w-3.5 h-3.5 text-gray-300" />
+                      <span>From Home Templates...</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Open (.sccrft, .fdx, .fountain) */}
+              <button
+                type="button"
+                onClick={() => {
+                  onOpenFromDevice?.();
+                  closeAllMenus();
+                }}
+                onMouseEnter={() => setFileSubmenu(null)}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center justify-between transition-colors"
+              >
+                <span className="flex items-center space-x-2">
+                  <FolderOpen className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Open...</span>
+                </span>
+                <span className="text-[10px] text-gray-400">Ctrl+O</span>
+              </button>
 
               <div className="h-px bg-[#333333] my-1"></div>
 
+              {/* Save (.sccrft) */}
               <button
+                type="button"
                 onClick={() => {
                   onSave();
-                  setOpenMenu(null);
+                  closeAllMenus();
                 }}
-                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 transition-colors"
+                onMouseEnter={() => setFileSubmenu(null)}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center justify-between transition-colors"
               >
-                <Save className="w-3.5 h-3.5" />
-                <span>Save Project</span>
-                <span className="ml-auto text-[10px] text-gray-400">Ctrl+S</span>
+                <span className="flex items-center space-x-2">
+                  <Save className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Save (.sccrft)</span>
+                </span>
+                <span className="text-[10px] text-gray-400">Ctrl+S</span>
               </button>
 
+              {/* Save As (.sccrft) */}
               <button
+                type="button"
                 onClick={() => {
-                  onImport();
-                  setOpenMenu(null);
+                  onSaveAs?.();
+                  closeAllMenus();
                 }}
+                onMouseEnter={() => setFileSubmenu(null)}
                 className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 transition-colors"
               >
-                <Upload className="w-3.5 h-3.5" />
-                <span>Import Fountain / Script...</span>
+                <Download className="w-3.5 h-3.5 text-amber-300" />
+                <span>Save As...</span>
+              </button>
+
+              {/* Save as Template */}
+              <button
+                type="button"
+                onClick={() => {
+                  onSaveAsTemplate?.();
+                  closeAllMenus();
+                }}
+                onMouseEnter={() => setFileSubmenu(null)}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 transition-colors"
+              >
+                <BookmarkPlus className="w-3.5 h-3.5 text-violet-300" />
+                <span>Save as Template...</span>
               </button>
 
               <div className="h-px bg-[#333333] my-1"></div>
 
-              <div className="px-3 py-1 text-[11px] font-semibold text-gray-400 border-b border-[#333333] uppercase tracking-wider">
-                Export Options
+              {/* Export Submenu (PDF, Final Draft, Fountain, Schedule CSV) */}
+              <div
+                className="relative"
+                onMouseEnter={() => setFileSubmenu('export')}
+                onMouseLeave={() => setFileSubmenu((prev) => (prev === 'export' ? null : prev))}
+              >
+                <button
+                  type="button"
+                  onClick={() => setFileSubmenu((prev) => (prev === 'export' ? null : 'export'))}
+                  className={`w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center justify-between transition-colors ${
+                    fileSubmenu === 'export' ? 'bg-[#333333] text-white' : ''
+                  }`}
+                >
+                  <span className="flex items-center space-x-2">
+                    <Upload className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Export</span>
+                  </span>
+                  <ChevronRight className="w-3.5 h-3.5 text-gray-400" />
+                </button>
+
+                {fileSubmenu === 'export' && (
+                  <div className="absolute left-full top-0 ml-0.5 w-56 bg-[#222222] border border-[#444444] rounded shadow-2xl py-1 z-50 text-gray-200">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onExport('pdf');
+                        closeAllMenus();
+                      }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 transition-colors"
+                    >
+                      <FileText className="w-3.5 h-3.5 text-rose-400" />
+                      <span>PDF (.pdf)...</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onExport('fdx');
+                        closeAllMenus();
+                      }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 transition-colors"
+                    >
+                      <FileCode className="w-3.5 h-3.5 text-blue-400" />
+                      <span>Final Draft (.fdx)...</span>
+                    </button>
+                    <div className="h-px bg-[#333333] my-1"></div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onExport('fountain');
+                        closeAllMenus();
+                      }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 transition-colors"
+                    >
+                      <FileText className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Fountain (.fountain)...</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onExport('csv');
+                        closeAllMenus();
+                      }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 transition-colors"
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Schedule CSV (.csv)...</span>
+                    </button>
+                  </div>
+                )}
               </div>
+
+              <div className="h-px bg-[#333333] my-1"></div>
+
+              {/* Print Preview */}
               <button
+                type="button"
                 onClick={() => {
-                  onExport('pdf');
-                  setOpenMenu(null);
+                  onPrintPreview?.();
+                  closeAllMenus();
                 }}
+                onMouseEnter={() => setFileSubmenu(null)}
                 className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 transition-colors"
               >
-                <Printer className="w-3.5 h-3.5 text-rose-400" />
-                <span>Export as PDF Screenplay...</span>
+                <Eye className="w-3.5 h-3.5 text-sky-400" />
+                <span>Print Preview...</span>
               </button>
+
+              {/* Print */}
               <button
+                type="button"
                 onClick={() => {
-                  onExport('fdx');
-                  setOpenMenu(null);
+                  onPrint?.();
+                  closeAllMenus();
                 }}
-                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 transition-colors"
+                onMouseEnter={() => setFileSubmenu(null)}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center justify-between transition-colors"
               >
-                <FileCode className="w-3.5 h-3.5 text-blue-400" />
-                <span>Export as Final Draft (.fdx)...</span>
-              </button>
-              <button
-                onClick={() => {
-                  onExport('fountain');
-                  setOpenMenu(null);
-                }}
-                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 transition-colors"
-              >
-                <FileText className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Export as Fountain Text (.fountain)...</span>
-              </button>
-              <button
-                onClick={() => {
-                  onExport('csv');
-                  setOpenMenu(null);
-                }}
-                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 transition-colors"
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5 text-amber-400" />
-                <span>Export Schedule as CSV...</span>
+                <span className="flex items-center space-x-2">
+                  <Printer className="w-3.5 h-3.5 text-gray-200" />
+                  <span>Print...</span>
+                </span>
+                <span className="text-[10px] text-gray-400">Ctrl+P</span>
               </button>
 
               <div className="h-px bg-[#333333] my-1"></div>
 
+              {/* Preferences */}
               <button
+                type="button"
                 onClick={() => {
-                  onExport('rust_zip');
-                  setOpenMenu(null);
+                  onOpenPreferences?.();
+                  closeAllMenus();
                 }}
-                className="w-full text-left px-3 py-1.5 bg-[#2d1f14] hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-amber-300 transition-colors"
+                onMouseEnter={() => setFileSubmenu(null)}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 transition-colors"
               >
-                <Download className="w-3.5 h-3.5" />
-                <span className="font-semibold">Export Rust Desktop Installer Package (.zip)</span>
+                <Settings className="w-3.5 h-3.5 text-[#ff8000]" />
+                <span>Preferences...</span>
+              </button>
+
+              <div className="h-px bg-[#333333] my-1"></div>
+
+              {/* Close */}
+              <button
+                type="button"
+                onClick={() => {
+                  onCloseDocument?.();
+                  closeAllMenus();
+                }}
+                onMouseEnter={() => setFileSubmenu(null)}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 transition-colors"
+              >
+                <XCircle className="w-3.5 h-3.5 text-gray-400" />
+                <span>Close</span>
               </button>
             </div>
           )}
@@ -271,7 +480,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             View
           </button>
           {openMenu === 'view' && (
-            <div className="absolute left-0 top-full mt-1 w-56 bg-[#222222] border border-[#444444] rounded shadow-2xl py-1 z-50 text-gray-200">
+            <div className="absolute left-0 top-full mt-1 w-60 bg-[#222222] border border-[#444444] rounded shadow-2xl py-1 z-50 text-gray-200">
               <button
                 onClick={() => {
                   onSelectWorkspace('authoring');
@@ -280,7 +489,27 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                 className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs"
               >
                 <Layout className="w-3.5 h-3.5" />
-                <span>Script Authoring View</span>
+                <span>Authoring Workspace</span>
+              </button>
+              <button
+                onClick={() => {
+                  onSelectWorkspace('characters');
+                  setOpenMenu(null);
+                }}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs"
+              >
+                <Users className="w-3.5 h-3.5 text-amber-400" />
+                <span>Characters &amp; Connections</span>
+              </button>
+              <button
+                onClick={() => {
+                  onSelectWorkspace('outline');
+                  setOpenMenu(null);
+                }}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs"
+              >
+                <ListTree className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Outline &amp; Beat Board</span>
               </button>
               <button
                 onClick={() => {
@@ -289,18 +518,8 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                 }}
                 className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs"
               >
-                <FileSpreadsheet className="w-3.5 h-3.5" />
-                <span>Production Stripboard View</span>
-              </button>
-              <button
-                onClick={() => {
-                  onSelectWorkspace('project_bible');
-                  setOpenMenu(null);
-                }}
-                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs"
-              >
-                <BookOpen className="w-3.5 h-3.5 text-amber-400" />
-                <span>Unified Project Bible & Pitch Hub</span>
+                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Production Workspace</span>
               </button>
               <button
                 onClick={() => {
@@ -310,32 +529,42 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                 className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs"
               >
                 <Camera className="w-3.5 h-3.5 text-amber-400" />
-                <span>Storyboard & Animatic View</span>
+                <span>Storyboarding Workspace</span>
               </button>
               <button
                 onClick={() => {
-                  onSelectWorkspace('rust_engine');
+                  onSelectWorkspace('collaboration');
                   setOpenMenu(null);
                 }}
                 className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs"
               >
-                <FileCode className="w-3.5 h-3.5" />
-                <span>Rust Native Architecture & Hub</span>
+                <GitPullRequest className="w-3.5 h-3.5 text-violet-400" />
+                <span>Collaboration &amp; Redlines</span>
+              </button>
+              <button
+                onClick={() => {
+                  onSelectWorkspace('teleprompter');
+                  setOpenMenu(null);
+                }}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs"
+              >
+                <MonitorPlay className="w-3.5 h-3.5 text-[#ff7700]" />
+                <span>Teleprompter Workspace</span>
               </button>
               {onOpenTeleprompter && (
-                <>
-                  <div className="h-px bg-[#333333] my-1"></div>
-                  <button
-                    onClick={() => {
-                      onOpenTeleprompter();
-                      setOpenMenu(null);
-                    }}
-                    className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs"
-                  >
-                    <MonitorPlay className="w-3.5 h-3.5 text-[#ff7700]" />
-                    <span>Studio Teleprompter Window...</span>
-                  </button>
-                </>
+                <div className="h-px bg-[#333333] my-1"></div>
+              )}
+              {onOpenTeleprompter && (
+                <button
+                  onClick={() => {
+                    onOpenTeleprompter();
+                    setOpenMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs"
+                >
+                  <MonitorPlay className="w-3.5 h-3.5 text-[#ff7700]" />
+                  <span>Pop-out Teleprompter Window...</span>
+                </button>
               )}
             </div>
           )}
@@ -579,79 +808,47 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             Insert
           </button>
           {openMenu === 'insert' && (
-            <div className="absolute left-0 top-full mt-1 w-52 bg-[#222222] border border-[#444444] rounded shadow-2xl py-1 z-50 text-gray-200">
-              <button
-                onClick={() => {
-                  onAddElement('SCENE_HEADING');
-                  setOpenMenu(null);
-                }}
-                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white text-xs font-semibold"
-              >
-                Scene Heading (INT./EXT.)
-              </button>
-              <button
-                onClick={() => {
-                  onAddElement('ACTION');
-                  setOpenMenu(null);
-                }}
-                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white text-xs"
-              >
-                Action
-              </button>
-              <button
-                onClick={() => {
-                  onAddElement('CHARACTER');
-                  setOpenMenu(null);
-                }}
-                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white text-xs font-semibold"
-              >
-                Character
-              </button>
-              <button
-                onClick={() => {
-                  onAddElement('DIALOGUE');
-                  setOpenMenu(null);
-                }}
-                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white text-xs"
-              >
-                Dialogue
-              </button>
-              <button
-                onClick={() => {
-                  onAddElement('VOICE_OVER');
-                  setOpenMenu(null);
-                }}
-                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white text-xs text-violet-300"
-              >
-                Voice-over (V.O.)
-              </button>
-              <button
-                onClick={() => {
-                  onAddElement('PARENTHETICAL');
-                  setOpenMenu(null);
-                }}
-                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white text-xs"
-              >
-                Parenthetical
-              </button>
-              <button
-                onClick={() => {
-                  onAddElement('TRANSITION');
-                  setOpenMenu(null);
-                }}
-                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white text-xs"
-              >
-                Transition (CUT TO:)
-              </button>
-              <button
-                onClick={() => {
-                  onAddElement('SHOT');
-                  setOpenMenu(null);
-                }}
-                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white text-xs"
-              >
-                Shot (Camera Setup)
-              </button>
+            <div className="absolute left-0 top-full mt-1 w-64 max-h-[75vh] overflow-y-auto bg-[#222222] border border-[#444444] rounded shadow-2xl py-1 z-50 text-gray-200">
+              <div className="px-3 py-1 text-[11px] font-semibold text-gray-400 border-b border-[#333333] uppercase tracking-wider">
+                Screenplay Elements (Ctrl+/)
+              </div>
+              {[
+                { type: 'GENERAL' as ElementType, key: 'G', label: 'General' },
+                { type: 'SCENE_HEADING' as ElementType, key: 'S', label: 'Scene Heading (INT./EXT.)', bold: true },
+                { type: 'ACTION' as ElementType, key: 'A', label: 'Action' },
+                { type: 'CHARACTER' as ElementType, key: 'C', label: 'Character', bold: true },
+                { type: 'PARENTHETICAL' as ElementType, key: 'P', label: 'Parenthetical' },
+                { type: 'DIALOGUE' as ElementType, key: 'D', label: 'Dialogue' },
+                { type: 'VOICE_OVER' as ElementType, key: 'V', label: 'Voice-over (V.O.)', accent: 'text-violet-300' },
+                { type: 'TRANSITION' as ElementType, key: 'T', label: 'Transition (CUT TO:)' },
+                { type: 'SHOT' as ElementType, key: 'H', label: 'Shot (Camera Setup)' },
+                { type: 'CAST_LIST' as ElementType, key: 'L', label: 'Cast List' },
+                { type: 'NEW_ACT' as ElementType, key: 'N', label: 'New Act' },
+                { type: 'SEQUENCE' as ElementType, key: 'Q', label: 'Sequence' },
+                { type: 'END_OF_ACT' as ElementType, key: 'E', label: 'End of Act' },
+                { type: 'SUMMARY' as ElementType, key: '0', label: 'Summary' },
+                { type: 'OUTLINE_1' as ElementType, key: '1', label: 'Outline 1' },
+                { type: 'OUTLINE_2' as ElementType, key: '2', label: 'Outline 2' },
+                { type: 'OUTLINE_3' as ElementType, key: '3', label: 'Outline 3' },
+                { type: 'NOTE' as ElementType, key: '4', label: 'Note' },
+              ].map((item) => (
+                <button
+                  key={item.type}
+                  onClick={() => {
+                    onAddElement(item.type);
+                    setOpenMenu(null);
+                  }}
+                  className={`w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center justify-between text-xs ${
+                    item.bold ? 'font-semibold' : ''
+                  } ${item.accent || ''}`}
+                >
+                  <span className="flex items-center gap-2">
+                    <span className="font-mono text-[11px] text-amber-300/90">[{item.key}]</span>
+                    <span>{item.label}</span>
+                  </span>
+                  <span className="text-[10px] text-gray-400 font-mono">Alt+{item.key}</span>
+                </button>
+              ))}
             </div>
           )}
         </div>
@@ -764,17 +961,26 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             <option value="authoring" className="bg-[#222] text-gray-200">
               Authoring
             </option>
+            <option value="characters" className="bg-[#222] text-gray-200">
+              Characters
+            </option>
+            <option value="outline" className="bg-[#222] text-gray-200">
+              Outline
+            </option>
             <option value="production" className="bg-[#222] text-gray-200">
-              Production Schedule
+              Production
             </option>
             <option value="storyboard" className="bg-[#222] text-gray-200">
-              Storyboard & Animatic
+              Storyboarding
             </option>
-            <option value="rust_engine" className="bg-[#222] text-gray-200">
-              Rust Desktop Hub
+            <option value="collaboration" className="bg-[#222] text-gray-200">
+              Collaboration
+            </option>
+            <option value="teleprompter" className="bg-[#222] text-gray-200">
+              Teleprompter
             </option>
             <option value="projects" className="bg-[#222] text-gray-200">
-              Projects Browser
+              Home (Authoring &amp; Production)
             </option>
           </select>
         </div>

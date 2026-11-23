@@ -24,7 +24,8 @@ import { StoryProject, ScreenplayElement } from '../types/story';
 interface TeleprompterWindowProps {
   projects: StoryProject[];
   initialProjectId: string;
-  onClose: () => void;
+  onClose?: () => void;
+  embedded?: boolean;
 }
 
 type SourceMode = 'script_and_custom' | 'script_only' | 'custom_only';
@@ -37,6 +38,7 @@ export const TeleprompterWindow: React.FC<TeleprompterWindowProps> = ({
   projects,
   initialProjectId,
   onClose,
+  embedded = false,
 }) => {
   const [selectedProjectId, setSelectedProjectId] = useState<string>(
     () => initialProjectId || projects[0]?.id || ''
@@ -236,7 +238,7 @@ export const TeleprompterWindow: React.FC<TeleprompterWindowProps> = ({
       if (e.key === 'Escape') {
         if (document.fullscreenElement) {
           document.exitFullscreen().catch(() => {});
-        } else {
+        } else if (!embedded && onClose) {
           onClose();
         }
         return;
@@ -273,7 +275,7 @@ export const TeleprompterWindow: React.FC<TeleprompterWindowProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  }, [onClose, embedded]);
 
   const handleResetToTop = () => {
     setIsPlaying(false);
@@ -518,6 +520,30 @@ export const TeleprompterWindow: React.FC<TeleprompterWindowProps> = ({
           </div>
         );
 
+      case 'NEW_ACT':
+      case 'END_OF_ACT':
+        return (
+          <div
+            key={element.id}
+            className="my-12 text-center font-bold uppercase underline underline-offset-4 tracking-widest text-amber-300"
+            style={{
+              fontSize: `${Math.round(fontSize * 0.85)}px`,
+              lineHeight: 1.35,
+            }}
+          >
+            {text}
+          </div>
+        );
+
+      case 'NOTE':
+      case 'SUMMARY':
+      case 'OUTLINE_1':
+      case 'OUTLINE_2':
+      case 'OUTLINE_3':
+        return null;
+
+      case 'SEQUENCE':
+      case 'CAST_LIST':
       case 'ACTION':
       case 'GENERAL':
       default:
@@ -570,10 +596,14 @@ export const TeleprompterWindow: React.FC<TeleprompterWindowProps> = ({
   return (
     <div
       ref={containerRef}
-      role="dialog"
-      aria-modal="true"
+      role={embedded ? 'region' : 'dialog'}
+      aria-modal={embedded ? undefined : 'true'}
       aria-label="Teleprompter Dedicated Window"
-      className="fixed inset-0 z-50 bg-black text-white flex flex-col overflow-hidden"
+      className={
+        embedded
+          ? 'flex-1 min-h-0 h-full bg-black text-white flex flex-col overflow-hidden'
+          : 'fixed inset-0 z-50 bg-black text-white flex flex-col overflow-hidden'
+      }
     >
       {/* Top Operator Control Bar */}
       <header className="bg-[#0b0b0b] border-b border-neutral-800 px-4 py-2.5 flex flex-wrap items-center justify-between gap-4 shrink-0 select-none">
@@ -736,14 +766,16 @@ export const TeleprompterWindow: React.FC<TeleprompterWindowProps> = ({
             {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
           </button>
 
-          <button
-            onClick={onClose}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-xs font-medium text-white transition-colors whitespace-nowrap"
-            title="Close Teleprompter Window (Esc)"
-          >
-            <X className="w-4 h-4" />
-            <span>Close</span>
-          </button>
+          {!embedded && onClose && (
+            <button
+              onClick={onClose}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-xs font-medium text-white transition-colors whitespace-nowrap"
+              title="Close Teleprompter Window (Esc)"
+            >
+              <X className="w-4 h-4" />
+              <span>Close</span>
+            </button>
+          )}
         </div>
       </header>
 

@@ -116,7 +116,11 @@ const TOOL_DOCS: ToolDocEntry[] = [
       'Project edits auto-save every 30 seconds to localStorage, or press Ctrl+S / Cmd+S anytime.',
     ],
     shortcuts: [
-      { keys: 'Enter', action: 'Insert the next logical screenplay element' },
+      { keys: 'Enter (empty line) / Ctrl + /', action: 'Open the [G]..[4] Elements composing shortcut menu' },
+      { keys: 'Alt + G/S/A/C/P/D/V/T/H/L/N/Q/E/0..4', action: 'Switch element type directly while typing' },
+      { keys: 'Ctrl + B / I / U', action: 'Toggle Bold, Italic, or Underline on active block' },
+      { keys: 'Ctrl + Shift + X / H', action: 'Toggle Strikethrough or Highlight color' },
+      { keys: 'Ctrl + Shift + L / C / R', action: 'Align active block Left, Center, or Right' },
       { keys: 'Tab', action: 'Cycle Dialogue → Voice-over (V.O.) → Parenthetical' },
       { keys: 'Backspace (empty line)', action: 'Delete an empty screenplay element' },
     ],
@@ -366,11 +370,11 @@ const TOOL_DOCS: ToolDocEntry[] = [
   {
     id: 'character-connections',
     category: 'production',
-    categoryLabel: 'Production',
+    categoryLabel: 'Characters & Graph',
     name: 'Node-Based Character Connections Chart',
-    locationLabel: 'Cast & Crew → Connections · Project Bible → Connections',
+    locationLabel: 'Characters Workspace → Node Connections · Cast & Crew → Connections',
     summary:
-      'Visualize character co-appearances, dialogue exchanges, and narrative relationship dynamics on an interactive node graph to keep story arcs cohesive.',
+      'Visualize character co-appearances, dialogue exchanges, and narrative relationship dynamics on an interactive node graph with draggable connection descriptors.',
     icon: <Network className="w-4 h-4 text-cyan-400 shrink-0" />,
     steps: [
       {
@@ -379,9 +383,9 @@ const TOOL_DOCS: ToolDocEntry[] = [
           'Edge thickness and labels reflect shared scenes and dialogue/V.O. turns extracted live from your screenplay.',
       },
       {
-        title: 'Author narrative relationships & arc shifts',
+        title: 'Author narrative relationships & drag connection descriptors',
         detail:
-          'Click "+ Add Relationship" or select any node/edge to define Alliance, Conflict, Hierarchy, Emotional, or Mystery links along with story driver notes.',
+          'Click "+ Add Relationship" or select any node/edge to define Alliance, Conflict, Hierarchy, Emotional, or Mystery links, and drag any descriptor label freely across the canvas.',
       },
       {
         title: 'Arrange & filter the canvas',
@@ -390,7 +394,7 @@ const TOOL_DOCS: ToolDocEntry[] = [
       },
     ],
     tips: [
-      'Node positions save per project so your story web stays exactly where you arranged it.',
+      'Both node and connection descriptor positions save per project so your story web stays exactly where you arranged it.',
     ],
     launchLabel: 'Open Character Connections',
     onLaunch: (a) => a.onOpenCharacterConnections(),
@@ -401,7 +405,7 @@ const TOOL_DOCS: ToolDocEntry[] = [
     category: 'production',
     categoryLabel: 'Production',
     name: 'Shooting Location Map',
-    locationLabel: 'Production Menu → Shooting Location Map',
+    locationLabel: 'Production Workspace → Location Map',
     summary:
       'Link screenplay sets and scenes to real-world shooting addresses, inspect travel clusters, and verify studio vs. on-location logistics.',
     icon: <MapPin className="w-4 h-4 text-cyan-400 shrink-0" />,
@@ -427,28 +431,28 @@ const TOOL_DOCS: ToolDocEntry[] = [
   {
     id: 'storyboard-bible',
     category: 'visuals',
-    categoryLabel: 'Storyboards & Bible',
-    name: 'Storyboard Suite & Unified Project Bible',
-    locationLabel: 'Workspace Selector · View Menu',
+    categoryLabel: 'Storyboards & Overview',
+    name: 'Storyboarding Suite & Production Overview',
+    locationLabel: 'Storyboarding Workspace · Production Workspace',
     summary:
-      'Build scene-linked camera shot lists with lenses/movements in Storyboard & Animatic View, and maintain your logline, pitch deck, character bios, and research in the Project Bible.',
+      'Build scene-linked camera shot lists with lenses/movements in Storyboarding, and maintain your logline, pitch docs, research notes, equipment manifest, and finances in Production.',
     icon: <Camera className="w-4 h-4 text-amber-400 shrink-0" />,
     steps: [
       {
         title: 'Create camera shots linked to scenes',
         detail:
-          'Open the Shots tab in the Right Inspector to quick-add a storyboard frame for the active scene, or switch to the Storyboard & Animatic workspace to sketch/upload frames and preview animatic timing.',
+          'Open the Shots tab in the Right Inspector to quick-add a storyboard frame for the active scene, or use the Storyboarding workspace (or embedded Storyboards tab in Production).',
       },
       {
-        title: 'Centralize series/film pitch documents',
+        title: 'Centralize logline, pitch docs & research notes',
         detail:
-          'Switch to Unified Project Bible & Pitch Hub to edit your logline, themes, character bios, research notes, and character relationship map in one container.',
+          'Open the Production workspace to manage Logline & Overviews, Pitch Docs, Research Notes, Equipment Manifest, and Recalculate Finance tools.',
       },
     ],
     tips: [
       'Storyboard frames added here automatically appear in Multi-Column A/V Script mode.',
     ],
-    launchLabel: 'Open Storyboard Suite',
+    launchLabel: 'Open Storyboarding Suite',
     onLaunch: (a) => a.onSelectWorkspace('storyboard'),
     closesModalOnLaunch: true,
   },
@@ -553,11 +557,16 @@ const SHORTCUT_REFERENCE: {
   context: string;
   description: string;
 }[] = [
-  { keys: 'Enter', context: 'Screenplay Editor', description: 'Create next logical screenplay element (Scene Heading → Action, Character → Dialogue/V.O.)' },
+  { keys: 'Enter (empty) / Ctrl + /', context: 'Screenplay Editor', description: 'Open Elements popup ([G] General, [S] Scene Heading, [A] Action, [C] Character, [P] Parenthetical, [D] Dialogue, [V] V.O., [T] Transition, [H] Shot, [L] Cast List, [N] New Act, [Q] Sequence, [E] End of Act, [0] Summary, [1-3] Outline 1-3, [4] Note)' },
+  { keys: 'Alt + [Key]', context: 'Screenplay Editor', description: 'Instantly switch focused block using any Elements mnemonic key (G, S, A, C, P, D, V, T, H, L, N, Q, E, 0–4)' },
+  { keys: 'Ctrl + B / I / U', context: 'Screenplay Editor', description: 'Toggle Bold, Italic, or Underline formatting on the focused screenplay element' },
+  { keys: 'Ctrl + Shift + X / H', context: 'Screenplay Editor', description: 'Toggle Strikethrough or Highlight background on the focused screenplay element' },
+  { keys: 'Ctrl + Shift + L / C / R', context: 'Screenplay Editor', description: 'Set Left, Center, or Right text justification on the focused element' },
+  { keys: 'Enter', context: 'Non-empty Element', description: 'Create next logical screenplay element (Scene Heading → Action, Character → Dialogue/V.O.)' },
   { keys: 'Tab', context: 'Screenplay Editor', description: 'Cycle Dialogue ↔ Voice-over (V.O.) ↔ Parenthetical, or Action ↔ Character' },
   { keys: 'Backspace', context: 'Empty Script Element', description: 'Remove an empty element and return focus upward' },
   { keys: 'Ctrl + S / Cmd + S', context: 'Global', description: 'Save current project state immediately to local storage' },
-  { keys: 'Esc', context: 'Outline Search', description: 'Clear active scene outline search query' },
+  { keys: 'Esc', context: 'Outline Search / Popup', description: 'Close Elements popup or clear active scene outline search query' },
   { keys: 'Space', context: 'Teleprompter Window', description: 'Play / Pause teleprompter scrolling' },
 ];
 

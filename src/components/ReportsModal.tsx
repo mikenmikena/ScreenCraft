@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { X, FileText, Users, MapPin, Calendar, Download, Printer } from 'lucide-react';
+import { X, Users, MapPin, Calendar, Download, Printer } from 'lucide-react';
 import { StoryProject } from '../types/story';
+import { downloadReportPdf, printReportDocument } from '../utils/printHelper';
 
 interface ReportsModalProps {
   project: StoryProject;
@@ -9,6 +10,7 @@ interface ReportsModalProps {
 
 export const ReportsModal: React.FC<ReportsModalProps> = ({ project, onClose }) => {
   const [activeReport, setActiveReport] = useState<'cast' | 'locations' | 'schedule'>('cast');
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   // Compute stats
   const totalEighths = project.scenes.reduce((acc, s) => acc + s.eighths, 0);
@@ -183,17 +185,44 @@ export const ReportsModal: React.FC<ReportsModalProps> = ({ project, onClose }) 
         </div>
 
         {/* Footer */}
-        <div className="px-4 py-2.5 bg-[#1e1e1e] border-t border-[#383838] flex items-center justify-between">
+        <div className="px-4 py-2.5 bg-[#1e1e1e] border-t border-[#383838] flex items-center justify-between gap-3">
+          <div className="flex items-center space-x-2">
+            <button
+              type="button"
+              onClick={() => {
+                const res = printReportDocument(project, activeReport);
+                setStatusMessage(
+                  res.printed
+                    ? 'Print dialog opened for report'
+                    : `Print dialog blocked in preview — downloaded ${res.fallbackPdfFilename}`
+                );
+                setTimeout(() => setStatusMessage(null), 4000);
+              }}
+              className="px-3 py-1 bg-[#2c2c2c] hover:bg-[#383838] text-gray-200 rounded flex items-center space-x-1.5 whitespace-nowrap"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              <span>Print Report</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const filename = downloadReportPdf(project, activeReport);
+                setStatusMessage(`Downloaded ${filename}`);
+                setTimeout(() => setStatusMessage(null), 3500);
+              }}
+              className="px-3 py-1 bg-[#2c2c2c] hover:bg-[#383838] text-amber-300 rounded flex items-center space-x-1.5 whitespace-nowrap"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Export PDF</span>
+            </button>
+            {statusMessage && (
+              <span className="text-[11px] text-emerald-400 truncate">{statusMessage}</span>
+            )}
+          </div>
           <button
-            onClick={() => window.print()}
-            className="px-3 py-1 bg-[#2c2c2c] hover:bg-[#383838] text-gray-200 rounded flex items-center space-x-1.5"
-          >
-            <Printer className="w-3.5 h-3.5" />
-            <span>Print Report</span>
-          </button>
-          <button
+            type="button"
             onClick={onClose}
-            className="px-4 py-1 bg-[#ff7700] hover:bg-[#ff8c1a] text-white font-bold rounded"
+            className="px-4 py-1 bg-[#ff7700] hover:bg-[#ff8c1a] text-white font-bold rounded shrink-0"
           >
             Done
           </button>

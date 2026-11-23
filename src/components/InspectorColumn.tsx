@@ -29,7 +29,12 @@ import {
   Check,
   ShieldAlert,
   PanelRightClose,
-  PanelRightOpen
+  PanelRightOpen,
+  SpellCheck,
+  BookCheck,
+  Users,
+  ArrowUpRight,
+  Wand2,
 } from 'lucide-react';
 import {
   Scene,
@@ -39,20 +44,44 @@ import {
   StoryCharacter,
   StoryboardFrame,
   ScreenplayRevision,
-  RevisionChangeType
+  RevisionChangeType,
+  ScreenplayElement,
+  CharacterBio,
+  CharacterBreakdownOverride,
 } from '../types/story';
 import { SceneContinuityReport } from '../utils/sceneContinuityCheck';
 import { SceneContinuityPanel } from './SceneContinuityPanel';
+import {
+  analyzeScriptProofreading,
+  applyProofreadFixToText,
+  ProofreadIssue,
+  ProofreadScope,
+} from '../utils/scriptProofreading';
+
+export type InspectorTabId =
+  | 'comments'
+  | 'tags'
+  | 'properties'
+  | 'shots'
+  | 'history'
+  | 'continuity'
+  | 'proofread'
+  | 'characters';
 
 interface InspectorColumnProps {
   selectedScene: Scene | undefined;
+  allScenes?: Scene[];
+  elements?: ScreenplayElement[];
   comments: StoryComment[];
   tags: Tag[];
   characters: StoryCharacter[];
+  characterBios?: CharacterBio[];
+  characterBreakdowns?: CharacterBreakdownOverride[];
   storyboards?: StoryboardFrame[];
   revisions?: ScreenplayRevision[];
   activeDraftName?: string;
   activeDraftColor?: string;
+  customDictionary?: string[];
   onAddComment: (text: string) => void;
   onResolveComment: (commentId: string) => void;
   onDeleteComment: (commentId: string) => void;
@@ -63,13 +92,18 @@ interface InspectorColumnProps {
   onAddStoryboardFrame?: (sceneId: string) => void;
   onRevertRevision?: (revision: ScreenplayRevision) => void;
   onCreateDraftMilestone?: (name: string, color: string) => void;
+  onApplyElementTextFix?: (elementId: string, newText: string, description: string) => void;
+  onAddToDictionary?: (word: string) => void;
+  onJumpToElement?: (sceneId: string | undefined, elementId: string) => void;
+  onOpenCharactersWorkspace?: () => void;
   continuityReport?: SceneContinuityReport;
   onJumpToOccurrence?: (sceneId: string, elementId?: string) => void;
   onAcknowledgeContinuity?: (alertId: string) => void;
   onRestoreContinuity?: (alertId: string) => void;
   onOpenContinuityModal?: () => void;
   requestedTab?: {
-    tab: 'comments' | 'tags' | 'properties' | 'shots' | 'history' | 'continuity';
+    tab: InspectorTabId;
+    subMode?: 'spelling' | 'grammar';
     nonce: number;
   } | null;
   isCollapsed?: boolean;
@@ -78,13 +112,18 @@ interface InspectorColumnProps {
 
 export const InspectorColumn: React.FC<InspectorColumnProps> = ({
   selectedScene,
+  allScenes = [],
+  elements = [],
   comments,
   tags,
   characters,
+  characterBios = [],
+  characterBreakdowns = [],
   storyboards = [],
   revisions = [],
   activeDraftName = 'Blue Revision Draft',
   activeDraftColor = '#3b82f6',
+  customDictionary = [],
   onAddComment,
   onResolveComment,
   onDeleteComment,
@@ -95,6 +134,10 @@ export const InspectorColumn: React.FC<InspectorColumnProps> = ({
   onAddStoryboardFrame,
   onRevertRevision,
   onCreateDraftMilestone,
+  onApplyElementTextFix,
+  onAddToDictionary,
+  onJumpToElement,
+  onOpenCharactersWorkspace,
   continuityReport,
   onJumpToOccurrence,
   onAcknowledgeContinuity,
@@ -104,11 +147,17 @@ export const InspectorColumn: React.FC<InspectorColumnProps> = ({
   isCollapsed = false,
   onToggleCollapse,
 }) => {
-  const [activeTab, setActiveTab] = useState<'comments' | 'tags' | 'properties' | 'shots' | 'history' | 'continuity'>('history');
+  const [activeTab, setActiveTab] = useState<InspectorTabId>('history');
+  const [proofreadScope, setProofreadScope] = useState<ProofreadScope>('scene');
+  const [proofreadFilter, setProofreadFilter] = useState<'all' | 'spelling' | 'grammar'>('all');
+  const [characterInfoScope, setCharacterInfoScope] = useState<'scene' | 'project'>('scene');
 
   React.useEffect(() => {
     if (requestedTab?.tab) {
       setActiveTab(requestedTab.tab);
+      if (requestedTab.tab === 'proofread' && requestedTab.subMode) {
+        setProofreadFilter(requestedTab.subMode);
+      }
     }
   }, [requestedTab]);
   const [historyScope, setHistoryScope] = useState<'scene' | 'project'>('scene');
@@ -124,6 +173,97 @@ export const InspectorColumn: React.FC<InspectorColumnProps> = ({
   const [newTagCategory, setNewTagCategory] = useState<TagCategory>('character');
   const [newTagColor, setNewTagColor] = useState('#00d2d3');
   const [newTagImage, setNewTagImage] = useState<string | undefined>(undefined);
+
+  const proofreadReport = React.useMemo(
+    () =>
+      analyzeScriptProofreading(
+        elements,
+        allScenes.length > 0 ? allScenes : selectedScene ? [selectedScene] : [],
+        proofreadScope,
+        selectedScene?.id || null,
+        customDictionary
+      ),
+    [elements, allScenes, selectedScene, proofreadScope, customDictionary]
+  );
+
+  const filteredProofreadIssues = React.useMemo(() => {
+    if (proofreadFilter === 'all') return proofreadReport.issues;
+    return proofreadReport.issues.filter((i) => i.kind === proofreadFilter);
+  }, [proofreadReport.issues, proofreadFilter]);
+
+  const characterInfoRows = React.useMemo(() => {
+    const bioMap = new Map(
+      characterBios.map((b) => [b.characterName.trim().toUpperCase(), b])
+    );
+    const breakdownMap = new Map(
+      characterBreakdowns.map((b) => [b.characterName.trim().toUpperCase(), b])
+    );
+
+    const names = new Set<string>();
+    if (characterInfoScope === 'scene' && selectedScene) {
+      selectedScene.characters.forEach((c) => {
+        const norm = c.trim().toUpperCase();
+        if (norm) names.add(norm);
+      });
+      elements
+        .filter((el) => el.sceneId === selectedScene.id)
+        .forEach((el) => {
+          if (el.type === 'CHARACTER' && el.text.trim()) {
+            names.add(el.text.replace(/\(.*?\)/g, '').trim().toUpperCase());
+          } else if (el.character?.trim()) {
+            names.add(el.character.trim().toUpperCase());
+          }
+        });
+    } else {
+      characters.forEach((c) => names.add(c.name.trim().toUpperCase()));
+      characterBios.forEach((b) => names.add(b.characterName.trim().toUpperCase()));
+    }
+
+    const scopedElements =
+      characterInfoScope === 'scene' && selectedScene
+        ? elements.filter((el) => el.sceneId === selectedScene.id)
+        : elements;
+
+    return Array.from(names)
+      .filter(Boolean)
+      .map((name) => {
+        const storyChar = characters.find((c) => c.name.trim().toUpperCase() === name);
+        const bio = bioMap.get(name);
+        const breakdown = breakdownMap.get(name);
+
+        let dialogueLines = 0;
+        let voiceOverLines = 0;
+        let currentSpeaker = '';
+        scopedElements.forEach((el) => {
+          if (el.type === 'SCENE_HEADING' || el.type === 'ACTION' || el.type === 'TRANSITION') {
+            currentSpeaker = '';
+          } else if (el.type === 'CHARACTER') {
+            currentSpeaker = el.text.replace(/\(.*?\)/g, '').trim().toUpperCase();
+          } else if (el.type === 'DIALOGUE') {
+            const spk = (el.character || currentSpeaker).trim().toUpperCase();
+            if (spk === name) dialogueLines += 1;
+          } else if (el.type === 'VOICE_OVER') {
+            const spk = (el.character || currentSpeaker).trim().toUpperCase();
+            if (spk === name) voiceOverLines += 1;
+          }
+        });
+
+        return {
+          name,
+          color: storyChar?.color || '#f59e0b',
+          actor: storyChar?.actor,
+          roleType: bio?.roleType || breakdown?.roleCategory || 'Cast',
+          scenesCount: storyChar?.scenesCount || 0,
+          dialogueLines,
+          voiceOverLines,
+          summary: bio?.loglineSummary || storyChar?.description || '',
+          arc: breakdown?.characterArc || bio?.arcStartToEnd || '',
+          wardrobeNotes: breakdown?.wardrobeNotes || bio?.visualNotes || '',
+          propsCarried: breakdown?.propsCarried || [],
+        };
+      })
+      .sort((a, b) => b.dialogueLines + b.voiceOverLines - (a.dialogueLines + a.voiceOverLines));
+  }, [characterInfoScope, selectedScene, characters, characterBios, characterBreakdowns, elements]);
 
   const filteredComments = comments.filter((c) =>
     c.text.toLowerCase().includes(commentSearch.toLowerCase()) ||
@@ -221,9 +361,11 @@ export const InspectorColumn: React.FC<InspectorColumnProps> = ({
   const openCommentsCount = comments.filter((c) => !c.resolved).length;
   const activeContinuityCount = continuityReport ? continuityReport.summary.totalActive : 0;
 
+  const totalProofreadCount = proofreadReport.spellingCount + proofreadReport.grammarCount;
+
   if (isCollapsed) {
     const railItems: {
-      id: 'properties' | 'comments' | 'tags' | 'shots' | 'history' | 'continuity';
+      id: InspectorTabId;
       label: string;
       icon: React.ReactNode;
       hasAlert?: boolean;
@@ -231,14 +373,24 @@ export const InspectorColumn: React.FC<InspectorColumnProps> = ({
       { id: 'properties', label: 'Scene Properties', icon: <Sliders className="w-4 h-4" /> },
       { id: 'comments', label: `Comments (${openCommentsCount})`, icon: <MessageSquare className="w-4 h-4" /> },
       { id: 'tags', label: `Tags (${tags.length})`, icon: <TagIcon className="w-4 h-4" /> },
-      { id: 'shots', label: `Shots (${sceneShots.length})`, icon: <Camera className="w-4 h-4" /> },
-      { id: 'history', label: `History (${scopedRevisions.length})`, icon: <History className="w-4 h-4" /> },
+      { id: 'history', label: `Draft Revisions & History (${scopedRevisions.length})`, icon: <History className="w-4 h-4" /> },
       {
         id: 'continuity',
         label: `Continuity (${activeContinuityCount})`,
         icon: <ShieldAlert className="w-4 h-4" />,
         hasAlert: activeContinuityCount > 0,
       },
+      {
+        id: 'proofread',
+        label: `Spell & Grammar Check (${totalProofreadCount})`,
+        icon: <SpellCheck className="w-4 h-4" />,
+      },
+      {
+        id: 'characters',
+        label: `Character Info (${characterInfoRows.length})`,
+        icon: <Users className="w-4 h-4" />,
+      },
+      { id: 'shots', label: `Shots (${sceneShots.length})`, icon: <Camera className="w-4 h-4" /> },
     ];
 
     return (
@@ -305,13 +457,13 @@ export const InspectorColumn: React.FC<InspectorColumnProps> = ({
         )}
       </div>
 
-      {/* Stacked 2-Row Tab Grid (3 Columns × 2 Rows for Clear Scannability) */}
-      <div className="grid grid-cols-3 border-b border-[#383838] bg-[#1c1c1c] text-[11px]">
+      {/* Stacked 2-Row Tab Grid (4 Columns × 2 Rows for Clear Scannability) */}
+      <div className="grid grid-cols-4 border-b border-[#383838] bg-[#1c1c1c] text-[10px]">
         {/* Row 1 */}
         <button
           type="button"
           onClick={() => setActiveTab('properties')}
-          className={`py-2 px-1.5 flex items-center justify-center gap-1.5 font-semibold transition-colors border-r border-b border-[#303030] whitespace-nowrap truncate ${
+          className={`py-2 px-1 flex items-center justify-center gap-1 font-semibold transition-colors border-r border-b border-[#303030] whitespace-nowrap truncate ${
             activeTab === 'properties'
               ? 'bg-[#262626] text-[#ff8000] shadow-[inset_0_2px_0_0_#ff8000]'
               : 'text-gray-400 hover:text-gray-200 hover:bg-[#222]'
@@ -324,7 +476,7 @@ export const InspectorColumn: React.FC<InspectorColumnProps> = ({
         <button
           type="button"
           onClick={() => setActiveTab('comments')}
-          className={`py-2 px-1.5 flex items-center justify-center gap-1 font-semibold transition-colors border-r border-b border-[#303030] whitespace-nowrap truncate tabular-nums ${
+          className={`py-2 px-1 flex items-center justify-center gap-1 font-semibold transition-colors border-r border-b border-[#303030] whitespace-nowrap truncate tabular-nums ${
             activeTab === 'comments'
               ? 'bg-[#262626] text-[#ff8000] shadow-[inset_0_2px_0_0_#ff8000]'
               : 'text-gray-400 hover:text-gray-200 hover:bg-[#222]'
@@ -332,12 +484,12 @@ export const InspectorColumn: React.FC<InspectorColumnProps> = ({
           title="Review Comments"
         >
           <MessageSquare className="w-3 h-3 shrink-0" />
-          <span>Comments ({openCommentsCount})</span>
+          <span>Notes ({openCommentsCount})</span>
         </button>
         <button
           type="button"
           onClick={() => setActiveTab('tags')}
-          className={`py-2 px-1.5 flex items-center justify-center gap-1 font-semibold transition-colors border-b border-[#303030] whitespace-nowrap truncate tabular-nums ${
+          className={`py-2 px-1 flex items-center justify-center gap-1 font-semibold transition-colors border-r border-b border-[#303030] whitespace-nowrap truncate tabular-nums ${
             activeTab === 'tags'
               ? 'bg-[#262626] text-[#ff8000] shadow-[inset_0_2px_0_0_#ff8000]'
               : 'text-gray-400 hover:text-gray-200 hover:bg-[#222]'
@@ -347,38 +499,25 @@ export const InspectorColumn: React.FC<InspectorColumnProps> = ({
           <TagIcon className="w-3 h-3 shrink-0" />
           <span>Tags ({tags.length})</span>
         </button>
-
-        {/* Row 2 */}
-        <button
-          type="button"
-          onClick={() => setActiveTab('shots')}
-          className={`py-2 px-1.5 flex items-center justify-center gap-1 font-semibold transition-colors border-r border-[#303030] whitespace-nowrap truncate tabular-nums ${
-            activeTab === 'shots'
-              ? 'bg-[#262626] text-[#ff8000] shadow-[inset_0_2px_0_0_#ff8000]'
-              : 'text-gray-400 hover:text-gray-200 hover:bg-[#222]'
-          }`}
-          title="Storyboard & Camera Shots"
-        >
-          <Camera className="w-3 h-3 shrink-0" />
-          <span>Shots ({sceneShots.length})</span>
-        </button>
         <button
           type="button"
           onClick={() => setActiveTab('history')}
-          className={`py-2 px-1.5 flex items-center justify-center gap-1 font-semibold transition-colors border-r border-[#303030] whitespace-nowrap truncate tabular-nums ${
+          className={`py-2 px-1 flex items-center justify-center gap-1 font-semibold transition-colors border-b border-[#303030] whitespace-nowrap truncate tabular-nums ${
             activeTab === 'history'
               ? 'bg-[#262626] text-[#ff8000] shadow-[inset_0_2px_0_0_#ff8000]'
               : 'text-gray-400 hover:text-gray-200 hover:bg-[#222]'
           }`}
-          title="Screenplay Revision History & Edits"
+          title="History & Draft Revisions"
         >
           <History className="w-3 h-3 shrink-0" />
-          <span>History ({scopedRevisions.length})</span>
+          <span>History</span>
         </button>
+
+        {/* Row 2 */}
         <button
           type="button"
           onClick={() => setActiveTab('continuity')}
-          className={`py-2 px-1.5 flex items-center justify-center gap-1 font-semibold transition-colors whitespace-nowrap truncate tabular-nums ${
+          className={`py-2 px-1 flex items-center justify-center gap-1 font-semibold transition-colors border-r border-[#303030] whitespace-nowrap truncate tabular-nums ${
             activeTab === 'continuity'
               ? 'bg-[#262626] text-[#ff8000] shadow-[inset_0_2px_0_0_#ff8000]'
               : activeContinuityCount > 0
@@ -392,7 +531,46 @@ export const InspectorColumn: React.FC<InspectorColumnProps> = ({
               activeContinuityCount > 0 ? 'text-rose-400' : ''
             }`}
           />
-          <span>Continuity ({activeContinuityCount})</span>
+          <span>QC ({activeContinuityCount})</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('proofread')}
+          className={`py-2 px-1 flex items-center justify-center gap-1 font-semibold transition-colors border-r border-[#303030] whitespace-nowrap truncate tabular-nums ${
+            activeTab === 'proofread'
+              ? 'bg-[#262626] text-[#ff8000] shadow-[inset_0_2px_0_0_#ff8000]'
+              : 'text-gray-400 hover:text-gray-200 hover:bg-[#222]'
+          }`}
+          title="Spell Check & Grammar Check"
+        >
+          <SpellCheck className="w-3 h-3 shrink-0" />
+          <span>Spell ({totalProofreadCount})</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('characters')}
+          className={`py-2 px-1 flex items-center justify-center gap-1 font-semibold transition-colors border-r border-[#303030] whitespace-nowrap truncate tabular-nums ${
+            activeTab === 'characters'
+              ? 'bg-[#262626] text-[#ff8000] shadow-[inset_0_2px_0_0_#ff8000]'
+              : 'text-gray-400 hover:text-gray-200 hover:bg-[#222]'
+          }`}
+          title="Character Info & Dialogue Counts"
+        >
+          <Users className="w-3 h-3 shrink-0" />
+          <span>Chars</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('shots')}
+          className={`py-2 px-1 flex items-center justify-center gap-1 font-semibold transition-colors whitespace-nowrap truncate tabular-nums ${
+            activeTab === 'shots'
+              ? 'bg-[#262626] text-[#ff8000] shadow-[inset_0_2px_0_0_#ff8000]'
+              : 'text-gray-400 hover:text-gray-200 hover:bg-[#222]'
+          }`}
+          title="Storyboard & Camera Shots"
+        >
+          <Camera className="w-3 h-3 shrink-0" />
+          <span>Shots ({sceneShots.length})</span>
         </button>
       </div>
 
@@ -1263,6 +1441,306 @@ export const InspectorColumn: React.FC<InspectorColumnProps> = ({
           onRestoreAlert={(alertId) => onRestoreContinuity?.(alertId)}
           onOpenFullModal={() => onOpenContinuityModal?.()}
         />
+      )}
+
+      {/* TAB 7: SPELL CHECK & GRAMMAR CHECK */}
+      {activeTab === 'proofread' && (
+        <div className="flex flex-col flex-1 min-h-0 bg-[#242424]">
+          <div className="p-2.5 border-b border-[#333] bg-[#1e1e1e] space-y-2">
+            {/* Scope Toggle: This Scene vs Entire Project */}
+            <div className="grid grid-cols-2 p-0.5 bg-[#151515] rounded border border-[#3a3a3a]">
+              <button
+                type="button"
+                onClick={() => setProofreadScope('scene')}
+                className={`py-1 rounded text-[11px] font-semibold transition-colors ${
+                  proofreadScope === 'scene'
+                    ? 'bg-[#2d2d2d] text-[#ff8000]'
+                    : 'text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                This Scene {selectedScene ? `(#${selectedScene.sceneNumber})` : ''}
+              </button>
+              <button
+                type="button"
+                onClick={() => setProofreadScope('project')}
+                className={`py-1 rounded text-[11px] font-semibold transition-colors ${
+                  proofreadScope === 'project'
+                    ? 'bg-[#2d2d2d] text-[#ff8000]'
+                    : 'text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                Entire Project
+              </button>
+            </div>
+
+            {/* Kind Filter: All / Spell Check / Grammar Check */}
+            <div className="grid grid-cols-3 p-0.5 bg-[#151515] rounded border border-[#3a3a3a] tabular-nums">
+              <button
+                type="button"
+                onClick={() => setProofreadFilter('all')}
+                className={`py-1 rounded text-[10px] font-medium transition-colors ${
+                  proofreadFilter === 'all'
+                    ? 'bg-[#2d2d2d] text-white'
+                    : 'text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                All ({totalProofreadCount})
+              </button>
+              <button
+                type="button"
+                onClick={() => setProofreadFilter('spelling')}
+                className={`py-1 rounded text-[10px] font-medium transition-colors ${
+                  proofreadFilter === 'spelling'
+                    ? 'bg-[#2d2d2d] text-amber-300'
+                    : 'text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                Spelling ({proofreadReport.spellingCount})
+              </button>
+              <button
+                type="button"
+                onClick={() => setProofreadFilter('grammar')}
+                className={`py-1 rounded text-[10px] font-medium transition-colors ${
+                  proofreadFilter === 'grammar'
+                    ? 'bg-[#2d2d2d] text-cyan-300'
+                    : 'text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                Grammar ({proofreadReport.grammarCount})
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between text-[10px] text-gray-400">
+              <span className="tabular-nums">
+                Scanned {proofreadReport.totalElementsScanned} blocks
+              </span>
+              {filteredProofreadIssues.some((i) => i.safeAutoFix && i.suggestion) &&
+                onApplyElementTextFix && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Apply first safe fix per element sequentially on latest elements array
+                      const handledElementIds = new Set<string>();
+                      filteredProofreadIssues.forEach((issue: ProofreadIssue) => {
+                        if (!issue.safeAutoFix || !issue.suggestion) return;
+                        if (handledElementIds.has(issue.elementId)) return;
+                        const targetEl = elements.find((e) => e.id === issue.elementId);
+                        if (!targetEl) return;
+                        const fixed = applyProofreadFixToText(targetEl.text, issue);
+                        if (fixed !== targetEl.text) {
+                          handledElementIds.add(issue.elementId);
+                          onApplyElementTextFix(
+                            issue.elementId,
+                            fixed,
+                            `Auto-fixed ${issue.kind}: "${issue.wordOrPhrase}" → "${issue.suggestion}"`
+                          );
+                        }
+                      });
+                    }}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#ff7700] hover:bg-[#ff8c1a] text-black font-semibold text-[10px]"
+                  >
+                    <Wand2 className="w-3 h-3" />
+                    <span>Fix Safe Issues</span>
+                  </button>
+                )}
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
+            {filteredProofreadIssues.length === 0 ? (
+              <div className="text-center py-8 px-4 space-y-2 text-gray-400">
+                <CheckCircle className="w-8 h-8 mx-auto text-emerald-400" />
+                <p className="text-xs font-semibold text-gray-200">
+                  No {proofreadFilter === 'all' ? 'Spelling or Grammar' : proofreadFilter} Issues Found
+                </p>
+                <p className="text-[11px] text-gray-500">
+                  {proofreadScope === 'scene'
+                    ? 'The current scene looks clean. Switch to Entire Project to audit all scenes.'
+                    : 'All scanned screenplay blocks pass current spelling and grammar checks.'}
+                </p>
+              </div>
+            ) : (
+              filteredProofreadIssues.map((issue) => (
+                <div
+                  key={issue.id}
+                  className="bg-[#2c2c2c] border border-[#3e3e3e] rounded p-2.5 space-y-2"
+                >
+                  <div className="flex items-center justify-between gap-2 text-[10px]">
+                    <span
+                      className={`font-semibold uppercase tracking-wide flex items-center gap-1 ${
+                        issue.kind === 'spelling' ? 'text-amber-300' : 'text-cyan-300'
+                      }`}
+                    >
+                      {issue.kind === 'spelling' ? (
+                        <SpellCheck className="w-3 h-3" />
+                      ) : (
+                        <BookCheck className="w-3 h-3" />
+                      )}
+                      <span>{issue.kind}</span>
+                    </span>
+                    <span className="text-gray-400 font-mono tabular-nums truncate">
+                      {issue.sceneNumber ? `Sc ${issue.sceneNumber} · ` : ''}
+                      {issue.elementType.replace('_', ' ')}
+                    </span>
+                  </div>
+
+                  <p className="text-[11px] text-gray-200 leading-snug">{issue.message}</p>
+
+                  <div className="bg-[#1b1b1b] border border-[#353535] rounded px-2 py-1.5 font-mono text-[11px] text-gray-300 select-text">
+                    {issue.excerpt}
+                  </div>
+
+                  <div className="flex items-center flex-wrap gap-1.5 pt-0.5">
+                    {issue.suggestion && onApplyElementTextFix && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const targetEl = elements.find((e) => e.id === issue.elementId);
+                          if (!targetEl) return;
+                          const updated = applyProofreadFixToText(targetEl.text, issue);
+                          onApplyElementTextFix(
+                            issue.elementId,
+                            updated,
+                            `${issue.kind === 'spelling' ? 'Spell' : 'Grammar'} fix: "${issue.wordOrPhrase}" → "${issue.suggestion}"`
+                          );
+                        }}
+                        className="px-2 py-1 rounded bg-[#ff7700] hover:bg-[#ff8c1a] text-black font-semibold text-[10px]"
+                      >
+                        Fix → "{issue.suggestion}"
+                      </button>
+                    )}
+
+                    {issue.kind === 'spelling' && onAddToDictionary && (
+                      <button
+                        type="button"
+                        onClick={() => onAddToDictionary(issue.wordOrPhrase)}
+                        className="px-2 py-1 rounded bg-[#222] hover:bg-[#333] border border-[#444] text-gray-300 text-[10px]"
+                      >
+                        Ignore / Dictionary
+                      </button>
+                    )}
+
+                    {onJumpToElement && (
+                      <button
+                        type="button"
+                        onClick={() => onJumpToElement(issue.sceneId, issue.elementId)}
+                        className="ml-auto inline-flex items-center gap-1 px-2 py-1 rounded bg-[#222] hover:bg-[#333] border border-[#444] text-gray-300 text-[10px]"
+                        title="Focus element in script"
+                      >
+                        <span>Jump</span>
+                        <ArrowUpRight className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 8: CHARACTER INFO (This Scene vs Entire Project) */}
+      {activeTab === 'characters' && (
+        <div className="flex flex-col flex-1 min-h-0 bg-[#242424]">
+          <div className="p-2.5 border-b border-[#333] bg-[#1e1e1e] space-y-2">
+            <div className="grid grid-cols-2 p-0.5 bg-[#151515] rounded border border-[#3a3a3a]">
+              <button
+                type="button"
+                onClick={() => setCharacterInfoScope('scene')}
+                className={`py-1 rounded text-[11px] font-semibold transition-colors ${
+                  characterInfoScope === 'scene'
+                    ? 'bg-[#2d2d2d] text-[#ff8000]'
+                    : 'text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                This Scene {selectedScene ? `(#${selectedScene.sceneNumber})` : ''}
+              </button>
+              <button
+                type="button"
+                onClick={() => setCharacterInfoScope('project')}
+                className={`py-1 rounded text-[11px] font-semibold transition-colors ${
+                  characterInfoScope === 'project'
+                    ? 'bg-[#2d2d2d] text-[#ff8000]'
+                    : 'text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                Entire Project
+              </button>
+            </div>
+
+            {onOpenCharactersWorkspace && (
+              <button
+                type="button"
+                onClick={onOpenCharactersWorkspace}
+                className="w-full py-1.5 px-2.5 rounded bg-[#2a2a2a] hover:bg-[#353535] border border-[#444] text-amber-300 font-semibold text-[11px] flex items-center justify-center gap-1.5 transition-colors"
+              >
+                <Users className="w-3.5 h-3.5" />
+                <span>Open Full Characters & Node Connections</span>
+                <ArrowUpRight className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
+            {characterInfoRows.length === 0 ? (
+              <div className="text-center py-8 text-gray-500 space-y-2">
+                <Users className="w-8 h-8 mx-auto text-gray-600" />
+                <p className="text-xs text-gray-300">No characters found in this scope.</p>
+              </div>
+            ) : (
+              characterInfoRows.map((ch) => (
+                <div
+                  key={ch.name}
+                  className="bg-[#2c2c2c] border border-[#3e3e3e] rounded p-3 space-y-1.5"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="w-2.5 h-2.5 rounded-full shrink-0"
+                          style={{ backgroundColor: ch.color }}
+                        />
+                        <span className="font-bold text-gray-100 truncate">{ch.name}</span>
+                      </div>
+                      <div className="text-[10px] text-gray-400 mt-0.5">
+                        {ch.roleType}
+                        {ch.actor ? ` · Cast: ${ch.actor}` : ''}
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-mono text-amber-300 tabular-nums shrink-0">
+                      {ch.dialogueLines} dl{ch.voiceOverLines > 0 ? ` · ${ch.voiceOverLines} vo` : ''}
+                    </span>
+                  </div>
+
+                  {ch.summary && (
+                    <p className="text-[11px] text-gray-300 leading-relaxed">{ch.summary}</p>
+                  )}
+
+                  {ch.arc && (
+                    <div className="text-[10px] text-gray-400 pt-1 border-t border-[#383838]">
+                      <span className="text-gray-300 font-medium">Arc: </span>
+                      {ch.arc}
+                    </div>
+                  )}
+
+                  {ch.wardrobeNotes && (
+                    <div className="text-[10px] text-gray-400">
+                      <span className="text-gray-300 font-medium">Wardrobe: </span>
+                      {ch.wardrobeNotes}
+                    </div>
+                  )}
+
+                  {ch.propsCarried.length > 0 && (
+                    <div className="text-[10px] text-gray-400">
+                      <span className="text-gray-300 font-medium">Props: </span>
+                      {ch.propsCarried.join(' · ')}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
       )}
     </aside>
   );

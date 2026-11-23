@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ScreenplayElement,
   Scene,
@@ -10,12 +10,27 @@ import {
   StoryboardFrame,
   ScreenplayRevision,
   SceneContinuityAlert,
+  ElementFormatting,
+  EditorTypographySettings,
+  CollaboratorProfile,
+  CollaboratorSuggestion,
 } from '../types/story';
 import {
   buildLatestRevisionTimestampMap,
   getElementRevisionInfo,
   RevisionTier,
 } from '../utils/revisionPass';
+import {
+  DEFAULT_EDITOR_TYPOGRAPHY,
+  PAGE_LAYOUT_OPTIONS,
+  SCREENPLAY_ELEMENTS_META,
+  SHORTCUT_KEY_TO_ELEMENT_TYPE,
+  buildElementTextStyle,
+  estimateTextareaRows,
+  getElementMeta,
+  getEffectiveElementFormatting,
+  resolveFlexJustifyClass,
+} from '../utils/screenplayFormatting';
 import {
   MessageSquare,
   Camera,
@@ -26,6 +41,7 @@ import {
   Mic,
   History,
   ShieldAlert,
+  GitPullRequest,
 } from 'lucide-react';
 
 interface ScreenplayEditorProps {
@@ -38,13 +54,19 @@ interface ScreenplayEditorProps {
   revisions?: ScreenplayRevision[];
   isRevisionPassMode?: boolean;
   continuityAlertsByElementId?: Record<string, SceneContinuityAlert[]>;
+  collaborators?: CollaboratorProfile[];
+  collaboratorSuggestions?: CollaboratorSuggestion[];
+  onInspectSuggestion?: (suggestionId: string) => void;
   focusedElementId?: string | null;
   onInspectContinuityElement?: (elementId: string) => void;
   scriptFormat?: ScriptFormatMode;
   onChangeScriptFormat?: (format: ScriptFormatMode) => void;
+  editorTypography?: EditorTypographySettings;
+  elementsPopupTriggerNonce?: number;
   onAddStoryboardImageForScene?: (sceneId: string, imageUrl: string, description: string) => void;
   onUpdateElement: (id: string, text: string) => void;
   onUpdateElementType: (id: string, type: ElementType) => void;
+  onUpdateElementFormatting: (id: string, patch: Partial<ElementFormatting>) => void;
   onUpdateElementCharacter?: (id: string, character: string) => void;
   onAddElementAfter: (afterId: string, type: ElementType, text?: string) => void;
   onDeleteElement: (id: string) => void;
@@ -64,6 +86,13 @@ interface AVCueRow {
   visualElements: ScreenplayElement[];
   audioElements: ScreenplayElement[];
   storyboardFrame?: StoryboardFrame;
+}
+
+interface ElementsPopupState {
+  elementId: string;
+  highlightedIndex: number;
+  top: number;
+  left: number;
 }
 
 const getPaperRevisionClasses = (tier: RevisionTier) => {
@@ -102,6 +131,20 @@ const getAVRevisionClasses = (tier: RevisionTier) => {
   }
 };
 
+function resolveShortcutKeyFromEvent(e: React.KeyboardEvent): string | null {
+  const upperKey = e.key.toUpperCase();
+  if (SHORTCUT_KEY_TO_ELEMENT_TYPE[upperKey]) return upperKey;
+  if (e.code.startsWith('Key')) {
+    const letter = e.code.slice(3).toUpperCase();
+    if (SHORTCUT_KEY_TO_ELEMENT_TYPE[letter]) return letter;
+  }
+  if (e.code.startsWith('Digit')) {
+    const digit = e.code.slice(5);
+    if (SHORTCUT_KEY_TO_ELEMENT_TYPE[digit]) return digit;
+  }
+  return null;
+}
+
 export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
   elements,
   scenes,
@@ -111,13 +154,19 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
   revisions = [],
   isRevisionPassMode = false,
   continuityAlertsByElementId = {},
+  collaborators = [],
+  collaboratorSuggestions = [],
+  onInspectSuggestion,
   focusedElementId = null,
   onInspectContinuityElement,
   scriptFormat = 'single_column_film',
   onChangeScriptFormat,
+  editorTypography = DEFAULT_EDITOR_TYPOGRAPHY,
+  elementsPopupTriggerNonce = 0,
   onAddStoryboardImageForScene,
   onUpdateElement,
   onUpdateElementType,
+  onUpdateElementFormatting,
   onUpdateElementCharacter,
   onAddElementAfter,
   onDeleteElement,
@@ -129,16 +178,123 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
 }) => {
   const [activeElementId, setActiveElementId] = useState<string | null>(null);
   const [hoveredElementId, setHoveredElementId] = useState<string | null>(null);
-  const elementDomRefs = React.useRef<Map<string, HTMLElement>>(new Map());
+  const [elementsPopup, setElementsPopup] = useState<ElementsPopupState | null>(null);
+  const [pendingFocusId, setPendingFocusId] = useState<string | null>(null);
 
-  React.useEffect(() => {
+  const pageLayoutMeta =
+    PAGE_LAYOUT_OPTIONS.find((opt) => opt.id === (editorTypography.pageLayout || 'letter')) ||
+    PAGE_LAYOUT_OPTIONS[0];
+
+  const collaboratorById = useMemo(() => {
+    const map = new Map<string, CollaboratorProfile>();
+    collaborators.forEach((c) => map.set(c.id, c));
+    return map;
+  }, [collaborators]);
+
+  const pendingSuggestionsByElement = useMemo(() => {
+    const map = new Map<string, CollaboratorSuggestion[]>();
+    collaboratorSuggestions
+      .filter((s) => s.status === 'pending' && s.elementId)
+      .forEach((s) => {
+        const list = map.get(s.elementId!) || [];
+        list.push(s);
+        map.set(s.elementId!, list);
+      });
+    return map;
+  }, [collaboratorSuggestions]);
+
+  const elementDomRefs = useRef<Map<string, HTMLElement>>(new Map());
+  const inputRefs = useRef<Map<string, HTMLInputElement | HTMLTextAreaElement>>(new Map());
+  const popupContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
     if (!focusedElementId) return;
     setActiveElementId(focusedElementId);
     const node = elementDomRefs.current.get(focusedElementId);
     if (node) {
       node.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
+    requestAnimationFrame(() => {
+      const inputNode = inputRefs.current.get(focusedElementId);
+      if (inputNode && document.activeElement !== inputNode) {
+        inputNode.focus();
+      }
+    });
   }, [focusedElementId]);
+
+  useEffect(() => {
+    if (!pendingFocusId) return;
+    const targetId = pendingFocusId;
+    requestAnimationFrame(() => {
+      const inputNode = inputRefs.current.get(targetId);
+      if (inputNode) {
+        inputNode.focus();
+        const len = inputNode.value.length;
+        try {
+          inputNode.setSelectionRange(len, len);
+        } catch {
+          // ignore selection range errors on unsupported input states
+        }
+      }
+      setPendingFocusId(null);
+    });
+  }, [pendingFocusId, elements]);
+
+  const openElementsPopupForElement = (
+    elementId: string,
+    preferredType?: ElementType
+  ) => {
+    const wrapper = elementDomRefs.current.get(elementId);
+    const rect = wrapper?.getBoundingClientRect();
+    const popupWidth = 248;
+    const popupEstimatedHeight = 420;
+
+    let top = rect ? rect.bottom + 4 : 180;
+    let left = rect ? rect.left + 20 : 260;
+
+    if (top + popupEstimatedHeight > window.innerHeight - 16) {
+      top = Math.max(12, rect ? rect.top - popupEstimatedHeight - 4 : 80);
+    }
+    if (left + popupWidth > window.innerWidth - 16) {
+      left = Math.max(12, window.innerWidth - popupWidth - 20);
+    }
+
+    const currentEl = elements.find((el) => el.id === elementId);
+    const targetType = preferredType || currentEl?.type || 'SCENE_HEADING';
+    const matchedIdx = SCREENPLAY_ELEMENTS_META.findIndex((m) => m.type === targetType);
+
+    setElementsPopup({
+      elementId,
+      highlightedIndex: matchedIdx >= 0 ? matchedIdx : 1,
+      top,
+      left,
+    });
+  };
+
+  useEffect(() => {
+    if (!elementsPopupTriggerNonce) return;
+    const targetId =
+      (activeElementId && elements.some((el) => el.id === activeElementId) && activeElementId) ||
+      (focusedElementId && elements.some((el) => el.id === focusedElementId) && focusedElementId) ||
+      elements[elements.length - 1]?.id;
+    if (targetId) {
+      openElementsPopupForElement(targetId);
+    }
+  }, [elementsPopupTriggerNonce]);
+
+  useEffect(() => {
+    if (!elementsPopup) return;
+    const handleOutside = (e: MouseEvent) => {
+      if (
+        popupContainerRef.current &&
+        !popupContainerRef.current.contains(e.target as Node)
+      ) {
+        setElementsPopup(null);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, [elementsPopup]);
 
   const revisionTimestampMap = useMemo(
     () => buildLatestRevisionTimestampMap(revisions),
@@ -187,7 +343,13 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
       const scNum = currentScene?.sceneNumber ?? 1;
       const scHeading = currentScene?.heading || 'SCENE';
 
-      if (el.type === 'SCENE_HEADING' || el.type === 'SHOT' || !currentRow) {
+      if (
+        el.type === 'SCENE_HEADING' ||
+        el.type === 'SHOT' ||
+        el.type === 'NEW_ACT' ||
+        el.type === 'END_OF_ACT' ||
+        !currentRow
+      ) {
         pushRowIfReady();
         const sceneBoards = storyboards.filter((sb) => sb.sceneId === scId);
         const matchedBoard =
@@ -205,6 +367,8 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
               ? `SHOT ${el.shotNumber || cueCounter}`
               : el.type === 'SCENE_HEADING'
               ? `SC ${scNum}`
+              : el.type === 'NEW_ACT' || el.type === 'END_OF_ACT'
+              ? 'ACT'
               : `CUE ${cueCounter}`,
           visualElements: [el],
           audioElements: [],
@@ -222,7 +386,6 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
       ) {
         currentRow.audioElements.push(el);
       } else {
-        // Start a fresh visual+audio beat if current row already has audio dialogue
         if (currentRow.audioElements.length > 0) {
           pushRowIfReady();
           const sceneBoards = storyboards.filter((sb) => sb.sceneId === scId);
@@ -267,52 +430,215 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
     reader.readAsDataURL(file);
   };
 
+  const applyElementTypeSelection = (elementId: string, nextType: ElementType) => {
+    const target = elements.find((el) => el.id === elementId);
+    const meta = getElementMeta(nextType);
+    if (target && meta.uppercase && target.text) {
+      onUpdateElement(elementId, target.text.toUpperCase());
+    }
+    onUpdateElementType(elementId, nextType);
+    setElementsPopup(null);
+    setPendingFocusId(elementId);
+  };
+
+  const handleFormattingShortcut = (
+    e: React.KeyboardEvent,
+    element: ScreenplayElement
+  ): boolean => {
+    const mod = e.ctrlKey || e.metaKey;
+    if (!mod || e.altKey) return false;
+    const key = e.key.toLowerCase();
+    const eff = getEffectiveElementFormatting(element, editorTypography);
+
+    if (!e.shiftKey && key === 'b') {
+      e.preventDefault();
+      onUpdateElementFormatting(element.id, { bold: !eff.bold });
+      return true;
+    }
+    if (!e.shiftKey && key === 'i') {
+      e.preventDefault();
+      onUpdateElementFormatting(element.id, { italic: !eff.italic });
+      return true;
+    }
+    if (!e.shiftKey && key === 'u') {
+      e.preventDefault();
+      onUpdateElementFormatting(element.id, { underline: !eff.underline });
+      return true;
+    }
+    if (e.shiftKey && key === 'x') {
+      e.preventDefault();
+      onUpdateElementFormatting(element.id, { strikethrough: !eff.strikethrough });
+      return true;
+    }
+    if (e.shiftKey && key === 'h') {
+      e.preventDefault();
+      onUpdateElementFormatting(element.id, {
+        highlight: eff.highlight === 'none' ? 'yellow' : 'none',
+      });
+      return true;
+    }
+    if (e.shiftKey && key === 'l') {
+      e.preventDefault();
+      onUpdateElementFormatting(element.id, { align: 'left' });
+      return true;
+    }
+    if (e.shiftKey && key === 'c') {
+      e.preventDefault();
+      onUpdateElementFormatting(element.id, { align: 'center' });
+      return true;
+    }
+    if (e.shiftKey && key === 'r') {
+      e.preventDefault();
+      onUpdateElementFormatting(element.id, { align: 'right' });
+      return true;
+    }
+    if (!e.shiftKey && (e.key === '/' || e.key === ';')) {
+      e.preventDefault();
+      openElementsPopupForElement(element.id);
+      return true;
+    }
+    return false;
+  };
+
   const handleKeyDown = (
     e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>,
     element: ScreenplayElement,
     index: number
   ) => {
-    if (e.key === 'Enter') {
+    // 1. If the Elements popup is open for this element, handle navigation & single-key selection
+    if (elementsPopup && elementsPopup.elementId === element.id) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setElementsPopup(null);
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setElementsPopup((prev) =>
+          prev
+            ? {
+                ...prev,
+                highlightedIndex: (prev.highlightedIndex + 1) % SCREENPLAY_ELEMENTS_META.length,
+              }
+            : null
+        );
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setElementsPopup((prev) =>
+          prev
+            ? {
+                ...prev,
+                highlightedIndex:
+                  (prev.highlightedIndex - 1 + SCREENPLAY_ELEMENTS_META.length) %
+                  SCREENPLAY_ELEMENTS_META.length,
+              }
+            : null
+        );
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const chosen = SCREENPLAY_ELEMENTS_META[elementsPopup.highlightedIndex];
+        if (chosen) {
+          applyElementTypeSelection(element.id, chosen.type);
+        }
+        return;
+      }
+
+      if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+        const matchedKey = resolveShortcutKeyFromEvent(e);
+        if (matchedKey && SHORTCUT_KEY_TO_ELEMENT_TYPE[matchedKey]) {
+          e.preventDefault();
+          applyElementTypeSelection(element.id, SHORTCUT_KEY_TO_ELEMENT_TYPE[matchedKey]);
+          return;
+        }
+        if (e.key.length === 1) {
+          // User started typing regular text instead of a mnemonic -> dismiss popup and allow typing
+          setElementsPopup(null);
+        }
+      }
+    }
+
+    // 2. Formatting & Elements popup modifier shortcuts (Ctrl/Cmd + B/I/U/Shift+X/H/L/C/R, Ctrl+/)
+    if (handleFormattingShortcut(e, element)) {
+      return;
+    }
+
+    // 3. Direct Alt + [Key] element switching (matching [G], [S], [A], [C], ..., [4])
+    if (e.altKey && !e.ctrlKey && !e.metaKey) {
+      const matchedKey = resolveShortcutKeyFromEvent(e);
+      if (matchedKey && SHORTCUT_KEY_TO_ELEMENT_TYPE[matchedKey]) {
+        e.preventDefault();
+        applyElementTypeSelection(element.id, SHORTCUT_KEY_TO_ELEMENT_TYPE[matchedKey]);
+        return;
+      }
+    }
+
+    // 4. Typing "/" on an empty line opens the Elements composing popup
+    if (
+      e.key === '/' &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey &&
+      element.text === ''
+    ) {
       e.preventDefault();
+      openElementsPopupForElement(element.id);
+      return;
+    }
+
+    // 5. Enter key: on empty line -> open Elements popup; on non-empty line -> insert logical next element
+    if (e.key === 'Enter') {
+      if (e.shiftKey) {
+        // Allow explicit multi-line break within textarea
+        return;
+      }
+      e.preventDefault();
+
+      if (!element.text.trim()) {
+        const defaultSuggested: ElementType =
+          element.type === 'DIALOGUE' || element.type === 'VOICE_OVER'
+            ? 'ACTION'
+            : element.type;
+        openElementsPopupForElement(element.id, defaultSuggested);
+        return;
+      }
+
       if (element.type === 'CHARACTER') {
         const isVOCue = /\((V\.?O\.?|VOICE\s*OVER)\)/i.test(element.text);
         onAddElementAfter(element.id, isVOCue ? 'VOICE_OVER' : 'DIALOGUE');
-      } else if (element.type === 'DIALOGUE') {
-        if (!element.text.trim()) {
-          onUpdateElementType(element.id, 'ACTION');
-        } else {
-          onAddElementAfter(element.id, 'CHARACTER');
-        }
-      } else if (element.type === 'VOICE_OVER') {
-        if (!element.text.trim()) {
-          onUpdateElementType(element.id, 'ACTION');
-        } else {
-          onAddElementAfter(element.id, 'CHARACTER');
-        }
       } else if (element.type === 'PARENTHETICAL') {
         const prevEl = index > 0 ? elements[index - 1] : undefined;
-        const isVOCue = prevEl?.type === 'CHARACTER' && /\((V\.?O\.?|VOICE\s*OVER)\)/i.test(prevEl.text);
+        const isVOCue =
+          prevEl?.type === 'CHARACTER' && /\((V\.?O\.?|VOICE\s*OVER)\)/i.test(prevEl.text);
         onAddElementAfter(element.id, isVOCue ? 'VOICE_OVER' : 'DIALOGUE');
-      } else if (element.type === 'SCENE_HEADING') {
-        onAddElementAfter(element.id, 'ACTION');
       } else {
-        onAddElementAfter(element.id, 'ACTION');
+        const nextType = getElementMeta(element.type).nextOnEnter;
+        onAddElementAfter(element.id, nextType);
       }
-    } else if (e.key === 'Tab') {
+      return;
+    }
+
+    // 6. Tab key cycles common script beat types cleanly
+    if (e.key === 'Tab') {
       e.preventDefault();
-      if (element.type === 'DIALOGUE') {
-        onUpdateElementType(element.id, 'VOICE_OVER');
-      } else if (element.type === 'VOICE_OVER') {
-        onUpdateElementType(element.id, 'PARENTHETICAL');
-      } else if (element.type === 'PARENTHETICAL') {
-        onUpdateElementType(element.id, 'DIALOGUE');
-      } else if (element.type === 'ACTION') {
-        onUpdateElementType(element.id, 'CHARACTER');
-      } else if (element.type === 'CHARACTER') {
-        onUpdateElementType(element.id, 'DIALOGUE');
+      const targetTab = getElementMeta(element.type).tabTarget;
+      if (targetTab) {
+        applyElementTypeSelection(element.id, targetTab);
       }
-    } else if (e.key === 'Backspace' && element.text === '' && elements.length > 1) {
+      return;
+    }
+
+    // 7. Backspace on empty line removes element and focuses previous element
+    if (e.key === 'Backspace' && element.text === '' && elements.length > 1) {
       e.preventDefault();
+      setElementsPopup(null);
+      const prevEl = index > 0 ? elements[index - 1] : elements[index + 1];
+      if (prevEl) {
+        setPendingFocusId(prevEl.id);
+      }
       onDeleteElement(element.id);
     }
   };
@@ -323,11 +649,26 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
       if (prev.type === 'CHARACTER') {
         return prev.text.replace(/\(.*?\)/g, '').trim().toUpperCase() || undefined;
       }
-      if (prev.type === 'SCENE_HEADING' || prev.type === 'ACTION' || prev.type === 'TRANSITION' || prev.type === 'SHOT') {
+      if (
+        prev.type === 'SCENE_HEADING' ||
+        prev.type === 'ACTION' ||
+        prev.type === 'TRANSITION' ||
+        prev.type === 'SHOT' ||
+        prev.type === 'NEW_ACT' ||
+        prev.type === 'END_OF_ACT'
+      ) {
         break;
       }
     }
     return undefined;
+  };
+
+  const registerInputRef = (
+    id: string,
+    node: HTMLInputElement | HTMLTextAreaElement | null
+  ) => {
+    if (node) inputRefs.current.set(id, node);
+    else inputRefs.current.delete(id);
   };
 
   return (
@@ -336,7 +677,9 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
       <div
         style={{ transform: `scale(${zoomLevel / 100})`, transformOrigin: 'top center' }}
         className={`w-full transition-transform duration-150 ${
-          scriptFormat === 'av_multi_column' ? 'max-w-[1060px]' : 'max-w-[850px]'
+          scriptFormat === 'av_multi_column'
+            ? 'max-w-[1060px]'
+            : pageLayoutMeta.paperMaxWidthClass
         }`}
       >
         {scriptFormat === 'av_multi_column' ? (
@@ -433,6 +776,11 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
                             ? getElementRevisionInfo(el, revisionTimestampMap)
                             : null;
                           const elContinuityAlerts = continuityAlertsByElementId[el.id] || [];
+                          const eff = getEffectiveElementFormatting(el, editorTypography);
+                          const inlineStyle = buildElementTextStyle(eff, 'dark');
+                          const meta = getElementMeta(el.type);
+                          const elIndex = elements.findIndex((item) => item.id === el.id);
+
                           return (
                             <div
                               key={el.id}
@@ -465,18 +813,24 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
                                 </button>
                               )}
                               <textarea
-                                rows={Math.max(1, Math.ceil(el.text.length / 42))}
+                                ref={(node) => registerInputRef(el.id, node)}
+                                rows={estimateTextareaRows(el.text, 40, eff.fontSizePt)}
                                 value={el.text}
+                                placeholder={meta.placeholder}
+                                style={{
+                                  ...inlineStyle,
+                                  fontSize: `${Math.max(10, Math.round(eff.fontSizePt * 0.9))}pt`,
+                                }}
                                 onChange={(e) =>
                                   onUpdateElement(
                                     el.id,
-                                    el.type === 'SCENE_HEADING' || el.type === 'SHOT'
-                                      ? e.target.value.toUpperCase()
-                                      : e.target.value
+                                    meta.uppercase ? e.target.value.toUpperCase() : e.target.value
                                   )
                                 }
+                                onKeyDown={(e) => handleKeyDown(e, el, elIndex)}
                                 onFocus={() => {
                                   setActiveElementId(el.id);
+                                  onFocusElement?.(el);
                                   onSelectScene(row.sceneId);
                                 }}
                                 title={
@@ -484,17 +838,13 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
                                     ? `Last edited: ${revInfo.label} (${revInfo.shortDateLabel})`
                                     : undefined
                                 }
-                                className={`w-full border rounded p-2 text-xs leading-relaxed resize-none focus:outline-none focus:border-[#ff8000] ${
+                                className={`w-full border rounded p-2 resize-none focus:outline-none focus:border-[#ff8000] ${
                                   revInfo
-                                    ? `${getAVRevisionClasses(revInfo.tier)} ${
-                                        el.type === 'SCENE_HEADING' || el.type === 'SHOT'
-                                          ? 'font-bold'
-                                          : ''
-                                      }`
+                                    ? getAVRevisionClasses(revInfo.tier)
                                     : el.type === 'SCENE_HEADING'
-                                    ? 'bg-[#171717] font-bold text-amber-300 border-[#3f3528]'
+                                    ? 'bg-[#171717] text-amber-300 border-[#3f3528]'
                                     : el.type === 'SHOT'
-                                    ? 'bg-[#171717] font-semibold text-cyan-300 border-[#283c44]'
+                                    ? 'bg-[#171717] text-cyan-300 border-[#283c44]'
                                     : 'bg-[#171717] text-gray-200 border-[#333333]'
                                 }`}
                               />
@@ -532,9 +882,18 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
                             ? getElementRevisionInfo(el, revisionTimestampMap)
                             : null;
                           const avRevBox = revInfo ? getAVRevisionClasses(revInfo.tier) : '';
+                          const eff = getEffectiveElementFormatting(el, editorTypography);
+                          const inlineStyle = buildElementTextStyle(eff, 'dark');
+                          const meta = getElementMeta(el.type);
+                          const elIndex = elements.findIndex((item) => item.id === el.id);
+
                           return (
                             <div
                               key={el.id}
+                              ref={(node) => {
+                                if (node) elementDomRefs.current.set(el.id, node);
+                                else elementDomRefs.current.delete(el.id);
+                              }}
                               title={
                                 revInfo
                                   ? `Last edited: ${revInfo.label} (${revInfo.shortDateLabel})`
@@ -543,16 +902,23 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
                             >
                               {el.type === 'CHARACTER' ? (
                                 <input
+                                  ref={(node) => registerInputRef(el.id, node)}
                                   type="text"
                                   value={el.text}
+                                  placeholder={meta.placeholder}
+                                  style={{
+                                    ...inlineStyle,
+                                    fontSize: `${Math.max(10, Math.round(eff.fontSizePt * 0.9))}pt`,
+                                  }}
                                   onChange={(e) =>
                                     onUpdateElement(el.id, e.target.value.toUpperCase())
                                   }
+                                  onKeyDown={(e) => handleKeyDown(e, el, elIndex)}
                                   onFocus={() => {
                                     setActiveElementId(el.id);
                                     onFocusElement?.(el);
                                   }}
-                                  className={`w-full font-bold uppercase text-xs px-1.5 py-0.5 focus:outline-none rounded border ${
+                                  className={`w-full uppercase px-1.5 py-0.5 focus:outline-none rounded border ${
                                     revInfo
                                       ? avRevBox
                                       : 'bg-transparent border-transparent text-amber-300 focus:bg-[#171717]'
@@ -560,14 +926,21 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
                                 />
                               ) : el.type === 'PARENTHETICAL' ? (
                                 <input
+                                  ref={(node) => registerInputRef(el.id, node)}
                                   type="text"
                                   value={el.text}
+                                  placeholder={meta.placeholder}
+                                  style={{
+                                    ...inlineStyle,
+                                    fontSize: `${Math.max(9, Math.round(eff.fontSizePt * 0.85))}pt`,
+                                  }}
                                   onChange={(e) => onUpdateElement(el.id, e.target.value)}
+                                  onKeyDown={(e) => handleKeyDown(e, el, elIndex)}
                                   onFocus={() => {
                                     setActiveElementId(el.id);
                                     onFocusElement?.(el);
                                   }}
-                                  className={`w-full italic text-[11px] px-1.5 py-0.5 focus:outline-none rounded border ${
+                                  className={`w-full px-1.5 py-0.5 focus:outline-none rounded border ${
                                     revInfo
                                       ? avRevBox
                                       : 'bg-transparent border-transparent text-gray-400 focus:bg-[#171717]'
@@ -587,15 +960,21 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
                                     )}
                                   </div>
                                   <textarea
-                                    rows={Math.max(1, Math.ceil(el.text.length / 42))}
+                                    ref={(node) => registerInputRef(el.id, node)}
+                                    rows={estimateTextareaRows(el.text, 40, eff.fontSizePt)}
                                     value={el.text}
-                                    placeholder="Enter voice-over narration or internal monologue..."
+                                    placeholder={meta.placeholder}
+                                    style={{
+                                      ...inlineStyle,
+                                      fontSize: `${Math.max(10, Math.round(eff.fontSizePt * 0.9))}pt`,
+                                    }}
                                     onChange={(e) => onUpdateElement(el.id, e.target.value)}
+                                    onKeyDown={(e) => handleKeyDown(e, el, elIndex)}
                                     onFocus={() => {
                                       setActiveElementId(el.id);
                                       onFocusElement?.(el);
                                     }}
-                                    className={`w-full border rounded p-2 text-xs italic leading-relaxed resize-none focus:outline-none focus:border-violet-400 ${
+                                    className={`w-full border rounded p-2 resize-none focus:outline-none focus:border-violet-400 ${
                                       revInfo
                                         ? avRevBox
                                         : 'bg-[#191624] border-violet-700/50 text-violet-100'
@@ -604,14 +983,21 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
                                 </div>
                               ) : (
                                 <textarea
-                                  rows={Math.max(1, Math.ceil(el.text.length / 42))}
+                                  ref={(node) => registerInputRef(el.id, node)}
+                                  rows={estimateTextareaRows(el.text, 40, eff.fontSizePt)}
                                   value={el.text}
+                                  placeholder={meta.placeholder}
+                                  style={{
+                                    ...inlineStyle,
+                                    fontSize: `${Math.max(10, Math.round(eff.fontSizePt * 0.9))}pt`,
+                                  }}
                                   onChange={(e) => onUpdateElement(el.id, e.target.value)}
+                                  onKeyDown={(e) => handleKeyDown(e, el, elIndex)}
                                   onFocus={() => {
                                     setActiveElementId(el.id);
                                     onFocusElement?.(el);
                                   }}
-                                  className={`w-full border rounded p-2 text-xs leading-relaxed resize-none focus:outline-none focus:border-[#ff8000] ${
+                                  className={`w-full border rounded p-2 resize-none focus:outline-none focus:border-[#ff8000] ${
                                     revInfo
                                       ? avRevBox
                                       : 'bg-[#171717] border-[#333333] text-gray-100'
@@ -629,13 +1015,17 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
             </div>
           </div>
         ) : (
-          /* Mode A: Screenplay Paper (Single-Column 12pt Courier) */
-          <div className="bg-[#fbf9f4] text-black font-courier text-[13px] leading-[1.3] px-16 py-16 rounded shadow-2xl min-h-[1150px] relative border border-[#e4ded0]">
+          /* Mode A: Screenplay Paper (Single-Column Live Formatted Page) */
+          <div
+            className={`bg-[#fbf9f4] text-black ${pageLayoutMeta.paperPaddingClass} rounded shadow-2xl min-h-[1150px] relative border border-[#e4ded0]`}
+          >
             {/* Header Strip */}
             <div className="flex items-center justify-between pb-6 border-b border-gray-300/60 mb-8 font-sans gap-4">
               <div className="flex items-center gap-3 min-w-0">
-                <span className="text-[11px] uppercase tracking-widest text-gray-500 font-semibold">
-                  SCREENCRAFT SCREENPLAY MASTER • INDUSTRY STANDARD 12PT COURIER
+                <span className="text-[11px] uppercase tracking-widest text-gray-500 font-semibold tabular-nums">
+                  SCREENCRAFT SCREENPLAY MASTER • {editorTypography.fontFamily.toUpperCase()} ·{' '}
+                  {editorTypography.fontSizePt} PT · {editorTypography.lineSpacing}× ·{' '}
+                  {pageLayoutMeta.shortLabel.toUpperCase()}
                 </span>
                 {isRevisionPassMode && (
                   <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-red-800 whitespace-nowrap">
@@ -660,14 +1050,8 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
               {elements.map((element, idx) => {
                 const elementComments = commentMap.get(element.id) || [];
                 const scene = element.sceneId ? sceneMap.get(element.sceneId) : undefined;
-                const isSceneHeading = element.type === 'SCENE_HEADING';
-                const isCharacter = element.type === 'CHARACTER';
-                const isDialogue = element.type === 'DIALOGUE';
-                const isVoiceOver = element.type === 'VOICE_OVER';
-                const isParenthetical = element.type === 'PARENTHETICAL';
-                const isTransition = element.type === 'TRANSITION';
-                const isShot = element.type === 'SHOT';
                 const isActive = activeElementId === element.id;
+                const isVoiceOver = element.type === 'VOICE_OVER';
                 const inferredSpeaker = isVoiceOver
                   ? element.character || resolvePrecedingSpeaker(idx) || 'NARRATOR'
                   : undefined;
@@ -677,6 +1061,27 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
                   : null;
                 const paperRev = revInfo ? getPaperRevisionClasses(revInfo.tier) : null;
                 const elContinuityAlerts = continuityAlertsByElementId[element.id] || [];
+                const elSuggestions = pendingSuggestionsByElement.get(element.id) || [];
+                const firstSugCollaborator =
+                  elSuggestions.length > 0
+                    ? collaboratorById.get(elSuggestions[0].collaboratorId)
+                    : undefined;
+
+                const meta = getElementMeta(element.type);
+                const eff = getEffectiveElementFormatting(element, editorTypography);
+                const textStyle = buildElementTextStyle(eff, 'paper');
+                const justifyClass = resolveFlexJustifyClass(eff.align);
+                const hasHighlight = eff.highlight !== 'none';
+                const highlightPadClass = hasHighlight ? 'px-1.5 py-0.5 rounded-sm' : '';
+
+                const commonInputHandlers = {
+                  onKeyDown: (e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+                    handleKeyDown(e, element, idx),
+                  onFocus: () => {
+                    setActiveElementId(element.id);
+                    onFocusElement?.(element);
+                  },
+                };
 
                 return (
                   <div
@@ -687,11 +1092,22 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
                     }}
                     onMouseEnter={() => setHoveredElementId(element.id)}
                     onMouseLeave={() => setHoveredElementId(null)}
+                    style={
+                      !paperRev && elContinuityAlerts.length === 0 && firstSugCollaborator
+                        ? {
+                            outline: `2px solid ${firstSugCollaborator.color}`,
+                            outlineOffset: '3px',
+                            backgroundColor: `${firstSugCollaborator.color}12`,
+                          }
+                        : undefined
+                    }
                     title={
                       revInfo
                         ? `Revision Pass: ${revInfo.label} (${revInfo.shortDateLabel})`
                         : elContinuityAlerts.length > 0
                         ? elContinuityAlerts[0].explanation
+                        : firstSugCollaborator
+                        ? `Non-destructive suggestion by ${firstSugCollaborator.name}: ${elSuggestions[0].proposedText}`
                         : undefined
                     }
                     className={`relative group transition-colors ${
@@ -699,6 +1115,8 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
                         ? paperRev.wrapper
                         : elContinuityAlerts.length > 0
                         ? 'bg-rose-50/70 ring-1 ring-rose-300/90 rounded px-2 -mx-2'
+                        : firstSugCollaborator
+                        ? 'rounded px-2 -mx-2'
                         : isActive
                         ? 'bg-amber-50/40 rounded'
                         : ''
@@ -711,6 +1129,30 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
                         <span>
                           {revInfo.label} · {revInfo.shortDateLabel}
                         </span>
+                      </div>
+                    )}
+                    {elSuggestions.length > 0 && firstSugCollaborator && (
+                      <div className="flex justify-end pt-1 font-sans">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onInspectSuggestion?.(elSuggestions[0].id);
+                          }}
+                          style={{
+                            borderColor: firstSugCollaborator.color,
+                            color: firstSugCollaborator.color,
+                            backgroundColor: '#ffffff',
+                          }}
+                          className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-[10px] font-semibold whitespace-nowrap shadow-xs hover:opacity-90 transition-opacity"
+                          title={`Non-destructive ${elSuggestions[0].kind.replace('_', ' ')} from ${firstSugCollaborator.name}: "${elSuggestions[0].proposedText}"`}
+                        >
+                          <GitPullRequest className="w-3 h-3 shrink-0" />
+                          <span>
+                            {firstSugCollaborator.name}: {elSuggestions.length}{' '}
+                            {elSuggestions.length === 1 ? 'Suggestion' : 'Suggestions'}
+                          </span>
+                        </button>
                       </div>
                     )}
                     {elContinuityAlerts.length > 0 && (
@@ -733,9 +1175,9 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
                       </div>
                     )}
 
-                    {/* Left Gutter Action Controls & Shot / V.O. Markers */}
-                    {isShot && (
-                      <div className="absolute -left-14 top-0 flex items-center space-x-1 text-gray-700 font-mono text-[11px] select-none font-bold">
+                    {/* Left Gutter Badges & Quick Elements Popup Trigger */}
+                    {element.type === 'SHOT' && (
+                      <div className="absolute -left-14 top-1 flex items-center space-x-1 text-gray-700 font-mono text-[11px] select-none font-bold">
                         <Camera className="w-3.5 h-3.5 text-blue-600" />
                         <span>{element.shotNumber || '1'}.</span>
                       </div>
@@ -750,23 +1192,62 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
                       </div>
                     )}
 
-                    {/* Scene Heading: INT./EXT. with Blue Timecode on right margin */}
-                    {isSceneHeading ? (
+                    {/* Active/Hovered Element Shortcut Badge [Key] (Click to open Elements menu) */}
+                    {(isActive || hoveredElementId === element.id) && (
+                      <div className="absolute -left-12 top-1/2 -translate-y-1/2 flex items-center space-x-1 select-none z-10">
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveElementId(element.id);
+                            onFocusElement?.(element);
+                            openElementsPopupForElement(element.id);
+                          }}
+                          title={`${meta.label} [${meta.shortcutKey}] — Click or press Ctrl+/ to switch element`}
+                          className={`px-1 py-0.5 rounded text-[10px] font-mono font-bold border shadow-xs transition-colors ${
+                            isActive
+                              ? 'bg-[#e6f6ff] border-[#5cc2ff] text-sky-900'
+                              : 'bg-stone-100 hover:bg-amber-100 border-stone-300 text-stone-700'
+                          }`}
+                        >
+                          [{meta.shortcutKey}]
+                        </button>
+                        {hoveredElementId === element.id && (
+                          <button
+                            type="button"
+                            onClick={() => onAddCommentForElement(element.id)}
+                            title="Add Review Note / Comment"
+                            className="p-0.5 rounded bg-amber-100 hover:bg-amber-200 text-amber-800 shadow border border-amber-300"
+                          >
+                            <MessageSquare className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Element Body by Type */}
+                    {element.type === 'SCENE_HEADING' ? (
                       <div
                         onClick={() => scene && onSelectScene(scene.id)}
                         className="flex items-baseline justify-between pt-6 pb-2 border-b border-gray-300/70 cursor-pointer"
                       >
                         <input
+                          ref={(node) => registerInputRef(element.id, node)}
                           type="text"
                           value={element.text}
-                          onChange={(e) => onUpdateElement(element.id, e.target.value.toUpperCase())}
+                          placeholder={meta.placeholder}
+                          style={textStyle}
+                          onChange={(e) =>
+                            onUpdateElement(element.id, e.target.value.toUpperCase())
+                          }
                           onKeyDown={(e) => handleKeyDown(e, element, idx)}
                           onFocus={() => {
                             setActiveElementId(element.id);
                             onFocusElement?.(element);
                             if (scene) onSelectScene(scene.id);
                           }}
-                          className={`font-bold tracking-wider uppercase w-full bg-transparent border-b border-transparent focus:border-amber-500 focus:outline-none ${
+                          className={`tracking-wider uppercase w-full bg-transparent border-b border-transparent focus:border-amber-500 focus:outline-none ${highlightPadClass} ${
                             paperRev ? paperRev.text : 'text-black'
                           }`}
                         />
@@ -774,41 +1255,47 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
                           {scene ? scene.timecode : '00:00:00'}
                         </span>
                       </div>
-                    ) : isCharacter ? (
-                      <div className="flex justify-center pt-3 pb-0.5">
+                    ) : element.type === 'CHARACTER' ? (
+                      <div className={`flex ${justifyClass} pt-3 pb-0.5`}>
                         <input
+                          ref={(node) => registerInputRef(element.id, node)}
                           type="text"
                           value={element.text}
-                          onChange={(e) => onUpdateElement(element.id, e.target.value.toUpperCase())}
-                          onKeyDown={(e) => handleKeyDown(e, element, idx)}
-                          onFocus={() => {
-                            setActiveElementId(element.id);
-                            onFocusElement?.(element);
-                          }}
-                          className={`font-bold uppercase text-center w-80 bg-transparent border-b border-transparent focus:border-amber-500 focus:outline-none ${
+                          placeholder={meta.placeholder}
+                          style={textStyle}
+                          onChange={(e) =>
+                            onUpdateElement(element.id, e.target.value.toUpperCase())
+                          }
+                          {...commonInputHandlers}
+                          className={`uppercase w-80 bg-transparent border-b border-transparent focus:border-amber-500 focus:outline-none ${highlightPadClass} ${
                             paperRev ? paperRev.text : 'text-black'
                           }`}
                         />
                       </div>
-                    ) : isParenthetical ? (
-                      <div className="flex justify-center py-0.5">
+                    ) : element.type === 'PARENTHETICAL' ? (
+                      <div className={`flex ${justifyClass} py-0.5`}>
                         <input
+                          ref={(node) => registerInputRef(element.id, node)}
                           type="text"
                           value={element.text}
+                          placeholder={meta.placeholder}
+                          style={textStyle}
                           onChange={(e) => onUpdateElement(element.id, e.target.value)}
-                          onKeyDown={(e) => handleKeyDown(e, element, idx)}
-                          onFocus={() => {
-                            setActiveElementId(element.id);
-                            onFocusElement?.(element);
-                          }}
-                          className={`italic text-center w-80 bg-transparent border-b border-transparent focus:border-amber-500 focus:outline-none ${
+                          {...commonInputHandlers}
+                          className={`w-80 bg-transparent border-b border-transparent focus:border-amber-500 focus:outline-none ${highlightPadClass} ${
                             paperRev ? paperRev.text : 'text-gray-800'
                           }`}
                         />
                       </div>
                     ) : isVoiceOver ? (
-                      <div className="flex flex-col items-center py-1">
-                        <div className="w-[420px] border-l-2 border-violet-500/80 pl-3 py-0.5 bg-violet-50/40 rounded-r">
+                      <div className={`flex flex-col ${
+                        eff.align === 'left'
+                          ? 'items-start'
+                          : eff.align === 'right'
+                          ? 'items-end'
+                          : 'items-center'
+                      } py-1`}>
+                        <div className="w-[420px] max-w-full border-l-2 border-violet-500/80 pl-3 py-0.5 bg-violet-50/40 rounded-r">
                           <div className="flex items-center justify-between gap-2 mb-0.5 font-sans">
                             <span className="text-[10px] font-mono font-bold tracking-wide text-violet-800 uppercase">
                               {inferredSpeaker} (V.O.)
@@ -831,97 +1318,209 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
                             )}
                           </div>
                           <textarea
-                            rows={Math.max(1, Math.ceil(element.text.length / 38))}
+                            ref={(node) => registerInputRef(element.id, node)}
+                            rows={estimateTextareaRows(element.text, 38, eff.fontSizePt)}
                             value={element.text}
-                            placeholder="Voice-over narration or internal monologue..."
+                            placeholder={meta.placeholder}
+                            style={textStyle}
                             onChange={(e) => onUpdateElement(element.id, e.target.value)}
-                            onKeyDown={(e) => handleKeyDown(e, element, idx)}
-                            onFocus={() => {
-                              setActiveElementId(element.id);
-                              onFocusElement?.(element);
-                            }}
-                            className={`italic text-left w-full bg-transparent resize-none leading-relaxed border-b border-transparent focus:border-violet-500 focus:outline-none ${
+                            {...commonInputHandlers}
+                            className={`w-full bg-transparent resize-none border-b border-transparent focus:border-violet-500 focus:outline-none ${highlightPadClass} ${
                               paperRev ? paperRev.text : 'text-gray-900'
                             }`}
                           />
                         </div>
                       </div>
-                    ) : isDialogue ? (
-                      <div className="flex justify-center py-0.5">
+                    ) : element.type === 'DIALOGUE' ? (
+                      <div className={`flex ${justifyClass} py-0.5`}>
                         <textarea
-                          rows={Math.max(1, Math.ceil(element.text.length / 38))}
+                          ref={(node) => registerInputRef(element.id, node)}
+                          rows={estimateTextareaRows(element.text, 38, eff.fontSizePt)}
                           value={element.text}
+                          placeholder={meta.placeholder}
+                          style={textStyle}
                           onChange={(e) => onUpdateElement(element.id, e.target.value)}
-                          onKeyDown={(e) => handleKeyDown(e, element, idx)}
-                          onFocus={() => {
-                            setActiveElementId(element.id);
-                            onFocusElement?.(element);
-                          }}
-                          className={`text-left w-[420px] bg-transparent resize-none leading-relaxed border-b border-transparent focus:border-amber-500 focus:outline-none ${
+                          {...commonInputHandlers}
+                          className={`${
+                            eff.align === 'left' ? 'w-full max-w-[480px]' : 'w-[420px] max-w-full'
+                          } bg-transparent resize-none border-b border-transparent focus:border-amber-500 focus:outline-none ${highlightPadClass} ${
                             paperRev ? paperRev.text : 'text-black'
                           }`}
                         />
                       </div>
-                    ) : isTransition ? (
-                      <div className="flex justify-end py-2">
+                    ) : element.type === 'TRANSITION' ? (
+                      <div className={`flex ${justifyClass} py-2`}>
                         <input
+                          ref={(node) => registerInputRef(element.id, node)}
                           type="text"
                           value={element.text}
-                          onChange={(e) => onUpdateElement(element.id, e.target.value.toUpperCase())}
-                          onKeyDown={(e) => handleKeyDown(e, element, idx)}
-                          onFocus={() => {
-                            setActiveElementId(element.id);
-                            onFocusElement?.(element);
-                          }}
-                          className={`font-bold uppercase text-right w-64 bg-transparent border-b border-transparent focus:border-amber-500 focus:outline-none ${
+                          placeholder={meta.placeholder}
+                          style={textStyle}
+                          onChange={(e) =>
+                            onUpdateElement(element.id, e.target.value.toUpperCase())
+                          }
+                          {...commonInputHandlers}
+                          className={`uppercase w-72 bg-transparent border-b border-transparent focus:border-amber-500 focus:outline-none ${highlightPadClass} ${
                             paperRev ? paperRev.text : 'text-black'
                           }`}
                         />
                       </div>
-                    ) : isShot ? (
+                    ) : element.type === 'SHOT' ? (
                       <div className="flex items-center pl-6 py-1 border-b border-gray-300/60">
                         <input
+                          ref={(node) => registerInputRef(element.id, node)}
                           type="text"
                           value={element.text}
-                          onChange={(e) => onUpdateElement(element.id, e.target.value.toUpperCase())}
-                          onKeyDown={(e) => handleKeyDown(e, element, idx)}
-                          onFocus={() => {
-                            setActiveElementId(element.id);
-                            onFocusElement?.(element);
-                          }}
-                          className={`font-bold tracking-wide uppercase w-full bg-transparent border-b border-transparent focus:border-amber-500 focus:outline-none ${
+                          placeholder={meta.placeholder}
+                          style={textStyle}
+                          onChange={(e) =>
+                            onUpdateElement(element.id, e.target.value.toUpperCase())
+                          }
+                          {...commonInputHandlers}
+                          className={`tracking-wide uppercase w-full bg-transparent border-b border-transparent focus:border-amber-500 focus:outline-none ${highlightPadClass} ${
                             paperRev ? paperRev.text : 'text-gray-800'
                           }`}
                         />
                       </div>
-                    ) : (
-                      <div className="py-1">
-                        <textarea
-                          rows={Math.max(1, Math.ceil(element.text.length / 65))}
+                    ) : element.type === 'NEW_ACT' || element.type === 'END_OF_ACT' ? (
+                      <div className={`flex ${justifyClass} py-4 border-y border-stone-300/70 my-2`}>
+                        <input
+                          ref={(node) => registerInputRef(element.id, node)}
+                          type="text"
                           value={element.text}
-                          onChange={(e) => onUpdateElement(element.id, e.target.value)}
-                          onKeyDown={(e) => handleKeyDown(e, element, idx)}
-                          onFocus={() => {
-                            setActiveElementId(element.id);
-                            onFocusElement?.(element);
-                          }}
-                          className={`text-left w-full bg-transparent resize-none leading-relaxed border-b border-transparent focus:border-amber-500 focus:outline-none ${
+                          placeholder={meta.placeholder}
+                          style={textStyle}
+                          onChange={(e) =>
+                            onUpdateElement(element.id, e.target.value.toUpperCase())
+                          }
+                          {...commonInputHandlers}
+                          className={`tracking-widest uppercase w-full bg-transparent border-b border-transparent focus:border-amber-500 focus:outline-none ${highlightPadClass} ${
                             paperRev ? paperRev.text : 'text-black'
                           }`}
                         />
                       </div>
-                    )}
-
-                    {/* Floating Action Hint / Add Comment button on hover */}
-                    {hoveredElementId === element.id && (
-                      <div className="absolute -left-10 top-1/2 -translate-y-1/2 flex items-center space-x-1 select-none">
-                        <button
-                          onClick={() => onAddCommentForElement(element.id)}
-                          title="Add Review Note / Comment"
-                          className="p-1 rounded bg-amber-100 hover:bg-amber-200 text-amber-800 shadow border border-amber-300"
-                        >
-                          <MessageSquare className="w-3.5 h-3.5" />
-                        </button>
+                    ) : element.type === 'SEQUENCE' ? (
+                      <div className="pt-4 pb-1 border-b border-stone-300/80">
+                        <input
+                          ref={(node) => registerInputRef(element.id, node)}
+                          type="text"
+                          value={element.text}
+                          placeholder={meta.placeholder}
+                          style={textStyle}
+                          onChange={(e) =>
+                            onUpdateElement(element.id, e.target.value.toUpperCase())
+                          }
+                          {...commonInputHandlers}
+                          className={`tracking-wider uppercase w-full bg-transparent border-b border-transparent focus:border-amber-500 focus:outline-none ${highlightPadClass} ${
+                            paperRev ? paperRev.text : 'text-stone-900'
+                          }`}
+                        />
+                      </div>
+                    ) : element.type === 'CAST_LIST' ? (
+                      <div className="py-1.5 px-3 bg-stone-100/70 border border-stone-300/80 rounded">
+                        <div className="text-[10px] font-sans font-semibold uppercase tracking-wider text-stone-500 mb-0.5">
+                          Cast List
+                        </div>
+                        <textarea
+                          ref={(node) => registerInputRef(element.id, node)}
+                          rows={estimateTextareaRows(element.text, 58, eff.fontSizePt)}
+                          value={element.text}
+                          placeholder={meta.placeholder}
+                          style={textStyle}
+                          onChange={(e) =>
+                            onUpdateElement(element.id, e.target.value.toUpperCase())
+                          }
+                          {...commonInputHandlers}
+                          className={`uppercase w-full bg-transparent resize-none border-b border-transparent focus:border-amber-500 focus:outline-none ${highlightPadClass} ${
+                            paperRev ? paperRev.text : 'text-stone-900'
+                          }`}
+                        />
+                      </div>
+                    ) : element.type === 'SUMMARY' ? (
+                      <div className="py-1.5 pl-4 border-l-2 border-amber-500/70 bg-amber-50/30 rounded-r">
+                        <div className="text-[10px] font-sans font-semibold uppercase tracking-wider text-amber-800/80 mb-0.5">
+                          Summary
+                        </div>
+                        <textarea
+                          ref={(node) => registerInputRef(element.id, node)}
+                          rows={estimateTextareaRows(element.text, 58, eff.fontSizePt)}
+                          value={element.text}
+                          placeholder={meta.placeholder}
+                          style={textStyle}
+                          onChange={(e) => onUpdateElement(element.id, e.target.value)}
+                          {...commonInputHandlers}
+                          className={`w-full bg-transparent resize-none border-b border-transparent focus:border-amber-500 focus:outline-none ${highlightPadClass} ${
+                            paperRev ? paperRev.text : 'text-stone-800'
+                          }`}
+                        />
+                      </div>
+                    ) : element.type === 'OUTLINE_1' ||
+                      element.type === 'OUTLINE_2' ||
+                      element.type === 'OUTLINE_3' ? (
+                      <div
+                        className={`py-1 ${
+                          element.type === 'OUTLINE_1'
+                            ? 'pl-0 border-b border-stone-300/60 pt-2'
+                            : element.type === 'OUTLINE_2'
+                            ? 'pl-6'
+                            : 'pl-12'
+                        }`}
+                      >
+                        <div className="flex items-start gap-2">
+                          <span className="text-[10px] font-mono text-stone-400 pt-1 shrink-0 select-none">
+                            {element.type === 'OUTLINE_1'
+                              ? 'O1'
+                              : element.type === 'OUTLINE_2'
+                              ? 'O2'
+                              : 'O3'}
+                          </span>
+                          <textarea
+                            ref={(node) => registerInputRef(element.id, node)}
+                            rows={estimateTextareaRows(element.text, 56, eff.fontSizePt)}
+                            value={element.text}
+                            placeholder={meta.placeholder}
+                            style={textStyle}
+                            onChange={(e) => onUpdateElement(element.id, e.target.value)}
+                            {...commonInputHandlers}
+                            className={`w-full bg-transparent resize-none border-b border-transparent focus:border-amber-500 focus:outline-none ${highlightPadClass} ${
+                              paperRev ? paperRev.text : 'text-stone-900'
+                            }`}
+                          />
+                        </div>
+                      </div>
+                    ) : element.type === 'NOTE' ? (
+                      <div className="py-1.5 px-3 bg-sky-50/75 border border-sky-300/80 rounded">
+                        <div className="text-[10px] font-sans font-semibold uppercase tracking-wider text-sky-800 mb-0.5">
+                          Script Note
+                        </div>
+                        <textarea
+                          ref={(node) => registerInputRef(element.id, node)}
+                          rows={estimateTextareaRows(element.text, 58, eff.fontSizePt)}
+                          value={element.text}
+                          placeholder={meta.placeholder}
+                          style={textStyle}
+                          onChange={(e) => onUpdateElement(element.id, e.target.value)}
+                          {...commonInputHandlers}
+                          className={`w-full bg-transparent resize-none border-b border-transparent focus:border-sky-500 focus:outline-none ${highlightPadClass} ${
+                            paperRev ? paperRev.text : 'text-sky-950'
+                          }`}
+                        />
+                      </div>
+                    ) : (
+                      /* ACTION / GENERAL */
+                      <div className="py-1">
+                        <textarea
+                          ref={(node) => registerInputRef(element.id, node)}
+                          rows={estimateTextareaRows(element.text, 62, eff.fontSizePt)}
+                          value={element.text}
+                          placeholder={meta.placeholder}
+                          style={textStyle}
+                          onChange={(e) => onUpdateElement(element.id, e.target.value)}
+                          {...commonInputHandlers}
+                          className={`w-full bg-transparent resize-none border-b border-transparent focus:border-amber-500 focus:outline-none ${highlightPadClass} ${
+                            paperRev ? paperRev.text : 'text-black'
+                          }`}
+                        />
                       </div>
                     )}
 
@@ -954,39 +1553,155 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
             <div className="mt-12 pt-6 border-t border-gray-300 flex flex-wrap items-center justify-center gap-2 font-sans select-none">
               <span className="text-xs text-gray-500">Insert element:</span>
               <button
-                onClick={() => onAddElementAfter(elements[elements.length - 1]?.id || 'root', 'SCENE_HEADING')}
+                onClick={() =>
+                  onAddElementAfter(elements[elements.length - 1]?.id || 'root', 'SCENE_HEADING')
+                }
                 className="px-2.5 py-1 bg-[#eae6dc] hover:bg-amber-100 text-gray-800 rounded text-xs font-semibold border border-gray-300 transition-colors"
               >
-                + Scene Heading
+                + [S] Scene Heading
               </button>
               <button
-                onClick={() => onAddElementAfter(elements[elements.length - 1]?.id || 'root', 'ACTION')}
+                onClick={() =>
+                  onAddElementAfter(elements[elements.length - 1]?.id || 'root', 'ACTION')
+                }
                 className="px-2.5 py-1 bg-[#eae6dc] hover:bg-amber-100 text-gray-800 rounded text-xs font-semibold border border-gray-300 transition-colors"
               >
-                + Action
+                + [A] Action
               </button>
               <button
-                onClick={() => onAddElementAfter(elements[elements.length - 1]?.id || 'root', 'CHARACTER')}
+                onClick={() =>
+                  onAddElementAfter(elements[elements.length - 1]?.id || 'root', 'CHARACTER')
+                }
                 className="px-2.5 py-1 bg-[#eae6dc] hover:bg-amber-100 text-gray-800 rounded text-xs font-semibold border border-gray-300 transition-colors"
               >
-                + Character
+                + [C] Character
               </button>
               <button
-                onClick={() => onAddElementAfter(elements[elements.length - 1]?.id || 'root', 'DIALOGUE')}
+                onClick={() =>
+                  onAddElementAfter(elements[elements.length - 1]?.id || 'root', 'DIALOGUE')
+                }
                 className="px-2.5 py-1 bg-[#eae6dc] hover:bg-amber-100 text-gray-800 rounded text-xs font-semibold border border-gray-300 transition-colors"
               >
-                + Dialogue
+                + [D] Dialogue
               </button>
               <button
-                onClick={() => onAddElementAfter(elements[elements.length - 1]?.id || 'root', 'VOICE_OVER')}
+                onClick={() =>
+                  onAddElementAfter(elements[elements.length - 1]?.id || 'root', 'VOICE_OVER')
+                }
                 className="px-2.5 py-1 bg-violet-100 hover:bg-violet-200 text-violet-900 rounded text-xs font-semibold border border-violet-300 transition-colors"
               >
-                + Voice-over (V.O.)
+                + [V] Voice-over
+              </button>
+              <button
+                onClick={() => {
+                  const lastId = elements[elements.length - 1]?.id;
+                  if (lastId) openElementsPopupForElement(lastId);
+                }}
+                className="px-2.5 py-1 bg-[#e6f6ff] hover:bg-[#cdeeff] text-sky-900 rounded text-xs font-semibold border border-[#5cc2ff] transition-colors"
+              >
+                All Elements (Ctrl+/)
               </button>
             </div>
           </div>
         )}
       </div>
+
+      {/* Floating "Elements" Shortcut Menu matching Reference Screenshot */}
+      {elementsPopup && (
+        <div
+          ref={popupContainerRef}
+          tabIndex={-1}
+          role="listbox"
+          aria-label="Elements composing shortcut menu"
+          style={{ top: elementsPopup.top, left: elementsPopup.left }}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              setPendingFocusId(elementsPopup.elementId);
+              setElementsPopup(null);
+            } else if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              setElementsPopup((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      highlightedIndex:
+                        (prev.highlightedIndex + 1) % SCREENPLAY_ELEMENTS_META.length,
+                    }
+                  : null
+              );
+            } else if (e.key === 'ArrowUp') {
+              e.preventDefault();
+              setElementsPopup((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      highlightedIndex:
+                        (prev.highlightedIndex - 1 + SCREENPLAY_ELEMENTS_META.length) %
+                        SCREENPLAY_ELEMENTS_META.length,
+                    }
+                  : null
+              );
+            } else if (e.key === 'Enter') {
+              e.preventDefault();
+              const chosen = SCREENPLAY_ELEMENTS_META[elementsPopup.highlightedIndex];
+              if (chosen) {
+                applyElementTypeSelection(elementsPopup.elementId, chosen.type);
+              }
+            } else {
+              const matchedKey = resolveShortcutKeyFromEvent(e);
+              if (matchedKey && SHORTCUT_KEY_TO_ELEMENT_TYPE[matchedKey]) {
+                e.preventDefault();
+                applyElementTypeSelection(
+                  elementsPopup.elementId,
+                  SHORTCUT_KEY_TO_ELEMENT_TYPE[matchedKey]
+                );
+              }
+            }
+          }}
+          className="fixed z-50 w-[248px] bg-white border border-neutral-300 rounded-md shadow-2xl overflow-hidden text-black select-none"
+        >
+          {/* Header Bar */}
+          <div className="bg-[#f3f4f6] border-b border-neutral-200 px-3 py-1.5 flex items-center justify-between text-[12px] font-sans text-neutral-500">
+            <span className="font-medium">Elements</span>
+            <span className="text-[10px] text-neutral-400 font-mono">Key / ↑↓ / Enter</span>
+          </div>
+
+          {/* Monospace Mnemonic List */}
+          <div className="py-1 max-h-[400px] overflow-y-auto font-mono text-[13px] leading-snug">
+            {SCREENPLAY_ELEMENTS_META.map((meta, idx) => {
+              const isHighlighted = idx === elementsPopup.highlightedIndex;
+              return (
+                <button
+                  key={meta.type}
+                  type="button"
+                  role="option"
+                  aria-selected={isHighlighted}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onMouseEnter={() =>
+                    setElementsPopup((prev) =>
+                      prev ? { ...prev, highlightedIndex: idx } : null
+                    )
+                  }
+                  onClick={() =>
+                    applyElementTypeSelection(elementsPopup.elementId, meta.type)
+                  }
+                  className={`w-full text-left px-2.5 py-0.5 flex items-center justify-between transition-colors cursor-pointer ${
+                    isHighlighted
+                      ? 'bg-[#67cbff] text-black'
+                      : 'bg-white text-black hover:bg-[#e5f5ff]'
+                  }`}
+                >
+                  <span>
+                    <span className="inline-block w-9">[{meta.shortcutKey}]</span>
+                    <span>{meta.label}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </main>
   );
 };

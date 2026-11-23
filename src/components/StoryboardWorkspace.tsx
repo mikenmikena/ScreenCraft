@@ -20,11 +20,7 @@ import {
   Layers,
   ArrowRight,
   Upload,
-  RotateCcw,
-  Sparkles,
   Grid,
-  Check,
-  Eye,
   Sliders
 } from 'lucide-react';
 import {
@@ -34,6 +30,8 @@ import {
   CameraMovement,
   StoryProject
 } from '../types/story';
+import { printStoryboardDocument } from '../utils/printHelper';
+import { StoryboardBlockingCanvasModal } from './StoryboardBlockingCanvasModal';
 
 interface StoryboardWorkspaceProps {
   project: StoryProject;
@@ -86,11 +84,6 @@ export const StoryboardWorkspace: React.FC<StoryboardWorkspaceProps> = ({
 
   // Sketch Drawing Modal State
   const [sketchingFrameId, setSketchingFrameId] = useState<string | null>(null);
-  const [brushColor, setBrushColor] = useState<string>('#ffffff');
-  const [brushSize, setBrushSize] = useState<number>(3);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [canvasHistory, setCanvasHistory] = useState<string[]>([]);
 
   // Frame Editor Modal
   const [editingFrame, setEditingFrame] = useState<StoryboardFrame | null>(null);
@@ -121,64 +114,10 @@ export const StoryboardWorkspace: React.FC<StoryboardWorkspaceProps> = ({
     return () => clearTimeout(timer);
   }, [isPlayingAnimatic, currentAnimaticIndex, filteredFrames, playbackSpeed]);
 
-  // Sketch Canvas Drawing Handlers
-  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.strokeStyle = brushColor;
-    ctx.lineWidth = brushSize;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    setIsDrawing(true);
-  };
-
-  const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    ctx.lineTo(x, y);
-    ctx.stroke();
-  };
-
-  const stopDrawing = () => {
-    if (isDrawing && canvasRef.current) {
-      setIsDrawing(false);
-      const dataUrl = canvasRef.current.toDataURL();
-      setCanvasHistory((prev) => [...prev, dataUrl]);
-    }
-  };
-
-  const clearCanvas = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.fillStyle = '#1c1c1c';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    setCanvasHistory([]);
-  };
-
-  const saveSketch = () => {
-    if (!sketchingFrameId || !canvasRef.current) return;
-    const dataUrl = canvasRef.current.toDataURL();
+  // Sketch Canvas Save & Open Handlers
+  const saveSketch = (frameId: string, dataUrl: string) => {
     const updated = storyboards.map((f) =>
-      f.id === sketchingFrameId ? { ...f, imageUrl: dataUrl, drawingData: dataUrl } : f
+      f.id === frameId ? { ...f, imageUrl: dataUrl, drawingData: dataUrl } : f
     );
     onUpdateStoryboards(updated);
     setSketchingFrameId(null);
@@ -186,23 +125,6 @@ export const StoryboardWorkspace: React.FC<StoryboardWorkspaceProps> = ({
 
   const openSketchModal = (frame: StoryboardFrame) => {
     setSketchingFrameId(frame.id);
-    setTimeout(() => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      ctx.fillStyle = '#1c1c1c';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      if (frame.imageUrl) {
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.onload = () => {
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        };
-        img.src = frame.imageUrl;
-      }
-    }, 50);
   };
 
   // Reordering & frame operations
@@ -372,9 +294,10 @@ export const StoryboardWorkspace: React.FC<StoryboardWorkspaceProps> = ({
 
           {/* Print Storyboard Sheet */}
           <button
-            onClick={() => window.print()}
+            type="button"
+            onClick={() => printStoryboardDocument(project, filteredFrames)}
             className="p-1.5 bg-[#333] hover:bg-[#444] text-gray-300 hover:text-white rounded border border-[#444]"
-            title="Print Storyboard Sheet"
+            title="Print Storyboard Sheet (downloads PDF automatically if browser blocks print)"
           >
             <Printer className="w-3.5 h-3.5" />
           </button>
@@ -708,114 +631,19 @@ export const StoryboardWorkspace: React.FC<StoryboardWorkspaceProps> = ({
         </div>
       )}
 
-      {/* Interactive Storyboard Sketching Modal */}
-      {sketchingFrameId && (
-        <div className="fixed inset-0 bg-black/85 z-50 flex items-center justify-center p-4 select-none">
-          <div className="bg-[#242424] border border-[#444] rounded-lg shadow-2xl max-w-4xl w-full flex flex-col overflow-hidden text-xs">
-            {/* Header */}
-            <div className="px-4 py-3 bg-[#1d1d1d] border-b border-[#383838] flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Edit3 className="w-4 h-4 text-[#ff7700]" />
-                <span className="font-bold text-sm text-gray-100">
-                  Storyboard Blocking Canvas — Shot Sketch Tool
-                </span>
-              </div>
-              <button onClick={() => setSketchingFrameId(null)} className="text-gray-400 hover:text-white">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Drawing Tools Ribbon */}
-            <div className="px-4 py-2 bg-[#202020] border-b border-[#383838] flex items-center justify-between">
-              {/* Palette */}
-              <div className="flex items-center space-x-2">
-                <span className="text-gray-400">Color:</span>
-                {[
-                  { color: '#ffffff', label: 'White' },
-                  { color: '#f59e0b', label: 'Camera / Motion Amber' },
-                  { color: '#ef4444', label: 'Danger / Action Red' },
-                  { color: '#3b82f6', label: 'Actor Blocking Blue' },
-                  { color: '#10b981', label: 'Set / Prop Green' },
-                  { color: '#1c1c1c', label: 'Eraser / Dark' },
-                ].map((item) => (
-                  <button
-                    key={item.color}
-                    onClick={() => setBrushColor(item.color)}
-                    style={{ backgroundColor: item.color }}
-                    title={item.label}
-                    className={`w-6 h-6 rounded-full border-2 transition-transform ${
-                      brushColor === item.color ? 'scale-125 border-white ring-2 ring-[#ff7700]' : 'border-gray-500'
-                    }`}
-                  />
-                ))}
-              </div>
-
-              {/* Brush size */}
-              <div className="flex items-center space-x-2">
-                <span className="text-gray-400">Size:</span>
-                {[2, 4, 8, 14].map((sz) => (
-                  <button
-                    key={sz}
-                    onClick={() => setBrushSize(sz)}
-                    className={`w-7 h-7 rounded flex items-center justify-center font-mono ${
-                      brushSize === sz ? 'bg-[#ff7700] text-black font-bold' : 'bg-[#333] text-gray-300'
-                    }`}
-                  >
-                    {sz}px
-                  </button>
-                ))}
-              </div>
-
-              {/* Clear */}
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={clearCanvas}
-                  className="px-2.5 py-1 bg-[#333] hover:bg-[#444] text-gray-300 hover:text-red-400 rounded flex items-center space-x-1"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Clear Canvas</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Canvas Area */}
-            <div className="p-6 bg-[#181818] flex items-center justify-center">
-              <canvas
-                ref={canvasRef}
-                width={720}
-                height={405}
-                onMouseDown={startDrawing}
-                onMouseMove={draw}
-                onMouseUp={stopDrawing}
-                onMouseLeave={stopDrawing}
-                className="bg-[#1c1c1c] rounded border-2 border-[#444] shadow-2xl cursor-crosshair"
-              />
-            </div>
-
-            {/* Footer */}
-            <div className="px-4 py-3 bg-[#1d1d1d] border-t border-[#383838] flex items-center justify-between">
-              <span className="text-[11px] text-gray-400 font-sans">
-                Tip: Sketch camera angles, directional arrows, and actor staging directly on the 16:9 canvas.
-              </span>
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={() => setSketchingFrameId(null)}
-                  className="px-3 py-1.5 bg-[#333] hover:bg-[#444] text-gray-300 rounded"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={saveSketch}
-                  className="px-4 py-1.5 bg-[#ff7700] hover:bg-[#ff8c1a] text-white font-bold rounded shadow flex items-center space-x-1"
-                >
-                  <Check className="w-3.5 h-3.5" />
-                  <span>Save Sketch to Frame</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Interactive Storyboard Blocking Canvas Modal */}
+      {sketchingFrameId && (() => {
+        const activeSketchFrame = storyboards.find((f) => f.id === sketchingFrameId);
+        if (!activeSketchFrame) return null;
+        return (
+          <StoryboardBlockingCanvasModal
+            frame={activeSketchFrame}
+            aspectRatio={globalAspectRatio}
+            onClose={() => setSketchingFrameId(null)}
+            onSave={saveSketch}
+          />
+        );
+      })()}
 
       {/* Frame Edit / Add Modal */}
       {editingFrame && (

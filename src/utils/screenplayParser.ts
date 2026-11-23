@@ -221,6 +221,18 @@ export function serializeToFountain(project: StoryProject): string {
       }
     } else if (el.type === 'TRANSITION') {
       output += `\n> ${el.text}\n\n`;
+    } else if (el.type === 'NEW_ACT' || el.type === 'END_OF_ACT') {
+      output += `\n> ${el.text.toUpperCase()} <\n\n`;
+    } else if (el.type === 'OUTLINE_1') {
+      output += `\n# ${el.text}\n\n`;
+    } else if (el.type === 'OUTLINE_2') {
+      output += `\n## ${el.text}\n\n`;
+    } else if (el.type === 'OUTLINE_3') {
+      output += `\n### ${el.text}\n\n`;
+    } else if (el.type === 'SUMMARY') {
+      output += `= ${el.text}\n\n`;
+    } else if (el.type === 'NOTE') {
+      output += `[[${el.text}]]\n\n`;
     } else {
       output += `${el.text}\n\n`;
     }
@@ -295,6 +307,14 @@ export function exportToFinalDraftFdx(
     else if (el.type === 'PARENTHETICAL') fdxType = 'Parenthetical';
     else if (el.type === 'TRANSITION') fdxType = 'Transition';
     else if (el.type === 'SHOT') fdxType = 'Shot';
+    else if (el.type === 'CAST_LIST') fdxType = 'Cast List';
+    else if (el.type === 'NEW_ACT') fdxType = 'New Act';
+    else if (el.type === 'END_OF_ACT') fdxType = 'End of Act';
+    else if (el.type === 'OUTLINE_1') fdxType = 'Outline 1';
+    else if (el.type === 'OUTLINE_2') fdxType = 'Outline 2';
+    else if (el.type === 'OUTLINE_3') fdxType = 'Outline 3';
+    else if (el.type === 'NOTE') fdxType = 'Note';
+    else if (el.type === 'GENERAL' || el.type === 'SEQUENCE' || el.type === 'SUMMARY') fdxType = 'General';
 
     let outputText = el.text;
     if (el.type === 'CHARACTER') {

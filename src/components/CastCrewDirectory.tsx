@@ -14,6 +14,8 @@ import {
   Tag,
   CharacterBreakdownOverride,
   CharacterRelationshipEdge,
+  EquipmentItem,
+  FinanceSettings,
   StoryProject,
 } from '../types/story';
 import {
@@ -95,6 +97,13 @@ interface CastCrewDirectoryProps {
   onCreateCharacterTag?: (name: string, sceneIds: string[]) => void;
   onUpdateCharacterRelationships?: (relationships: CharacterRelationshipEdge[]) => void;
   onUpdateCharacterNodePositions?: (positions: Record<string, { x: number; y: number }>) => void;
+  onUpdateCharacterEdgePositions?: (positions: Record<string, { x: number; y: number }>) => void;
+  equipmentManifest?: EquipmentItem[];
+  financeSettings?: FinanceSettings;
+  onUpdateFinanceSettings?: (settings: FinanceSettings) => void;
+  onRecalculateFinances?: () => void;
+  embeddedMode?: boolean;
+  externalAddMemberNonce?: number;
   locationCount?: number;
   onSwitchSubView: (view: 'stripboard' | 'cast_crew' | 'location_map') => void;
   onSelectScene: (sceneId: string) => void;
@@ -206,6 +215,13 @@ export const CastCrewDirectory: React.FC<CastCrewDirectoryProps> = ({
   onCreateCharacterTag,
   onUpdateCharacterRelationships,
   onUpdateCharacterNodePositions,
+  onUpdateCharacterEdgePositions,
+  equipmentManifest = [],
+  financeSettings,
+  onUpdateFinanceSettings,
+  onRecalculateFinances,
+  embeddedMode = false,
+  externalAddMemberNonce = 0,
   locationCount = 0,
   onSwitchSubView,
   onSelectScene,
@@ -220,6 +236,14 @@ export const CastCrewDirectory: React.FC<CastCrewDirectoryProps> = ({
       setDirectoryView(initialDirectoryView);
     }
   }, [initialDirectoryView, initialCallSheetDay]);
+
+  React.useEffect(() => {
+    if (externalAddMemberNonce > 0) {
+      setDirectoryView('roster');
+      openAddModal();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalAddMemberNonce]);
 
   const characterTagCount = useMemo(
     () => tags.filter((t) => t.category === 'character').length,
@@ -560,54 +584,56 @@ export const CastCrewDirectory: React.FC<CastCrewDirectoryProps> = ({
   return (
     <div className="flex-1 bg-[#202020] flex flex-col min-h-0 overflow-hidden text-xs select-none">
       {/* Unified Production Schedule Workspace Toolbar (Row 1: View Switcher & Primary CTAs) */}
-      <div className="bg-[#292929] px-4 py-2 border-b border-[#3e3e3e] flex items-center justify-between gap-4 flex-shrink-0">
-        <div className="flex items-center gap-3 min-w-0">
-          {/* Segmented View Switcher: Stripboard vs Cast & Crew Address Book vs Location Map */}
-          <div className="flex items-center p-0.5 bg-[#191919] rounded border border-[#3c3c3c]">
+      {!embeddedMode && (
+        <div className="bg-[#292929] px-4 py-2 border-b border-[#3e3e3e] flex items-center justify-between gap-4 flex-shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            {/* Segmented View Switcher: Stripboard vs Cast & Crew Address Book vs Location Map */}
+            <div className="flex items-center p-0.5 bg-[#191919] rounded border border-[#3c3c3c]">
+              <button
+                onClick={() => onSwitchSubView('stripboard')}
+                className="flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium text-gray-400 hover:text-gray-200 transition-colors whitespace-nowrap shrink-0"
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>Stripboard</span>
+              </button>
+              <button
+                onClick={() => onSwitchSubView('cast_crew')}
+                className="flex items-center gap-1.5 px-3 py-1 rounded text-xs font-semibold bg-[#333333] text-[#ff8000] shadow-sm transition-colors whitespace-nowrap shrink-0"
+              >
+                <Users className="w-3.5 h-3.5" />
+                <span>Cast & Crew Address Book ({members.length})</span>
+              </button>
+              <button
+                onClick={() => onSwitchSubView('location_map')}
+                className="flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium text-gray-400 hover:text-gray-200 transition-colors whitespace-nowrap shrink-0"
+              >
+                <MapPin className="w-3.5 h-3.5" />
+                <span>Location Map ({locationCount})</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {unmappedScriptCastCount > 0 && (
+              <button
+                onClick={onImportScriptCast}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#242424] hover:bg-[#333333] text-amber-300 rounded border border-[#484848] transition-colors whitespace-nowrap shrink-0"
+                title="Create Cast Address Book entries from screenplay characters"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Sync Script Cast (+{unmappedScriptCastCount})</span>
+              </button>
+            )}
             <button
-              onClick={() => onSwitchSubView('stripboard')}
-              className="flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium text-gray-400 hover:text-gray-200 transition-colors whitespace-nowrap shrink-0"
+              onClick={() => openAddModal()}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#ff7700] hover:bg-[#ff8c1a] text-black font-semibold rounded transition-colors whitespace-nowrap shrink-0"
             >
-              <Layers className="w-3.5 h-3.5" />
-              <span>Stripboard</span>
-            </button>
-            <button
-              onClick={() => onSwitchSubView('cast_crew')}
-              className="flex items-center gap-1.5 px-3 py-1 rounded text-xs font-semibold bg-[#333333] text-[#ff8000] shadow-sm transition-colors whitespace-nowrap shrink-0"
-            >
-              <Users className="w-3.5 h-3.5" />
-              <span>Cast & Crew Address Book ({members.length})</span>
-            </button>
-            <button
-              onClick={() => onSwitchSubView('location_map')}
-              className="flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium text-gray-400 hover:text-gray-200 transition-colors whitespace-nowrap shrink-0"
-            >
-              <MapPin className="w-3.5 h-3.5" />
-              <span>Location Map ({locationCount})</span>
+              <UserPlus className="w-3.5 h-3.5" />
+              <span>Add Cast / Crew</span>
             </button>
           </div>
         </div>
-
-        <div className="flex items-center gap-2 shrink-0">
-          {unmappedScriptCastCount > 0 && (
-            <button
-              onClick={onImportScriptCast}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#242424] hover:bg-[#333333] text-amber-300 rounded border border-[#484848] transition-colors whitespace-nowrap shrink-0"
-              title="Create Cast Address Book entries from screenplay characters"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Sync Script Cast (+{unmappedScriptCastCount})</span>
-            </button>
-          )}
-          <button
-            onClick={() => openAddModal()}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#ff7700] hover:bg-[#ff8c1a] text-black font-semibold rounded transition-colors whitespace-nowrap shrink-0"
-          >
-            <UserPlus className="w-3.5 h-3.5" />
-            <span>Add Cast / Crew</span>
-          </button>
-        </div>
-      </div>
+      )}
 
       {/* Row 2: Directory Sub-View Tab Strip */}
       <div className="bg-[#232323] border-b border-[#383838] px-4 py-1.5 flex items-center justify-between gap-4 flex-shrink-0">
@@ -816,6 +842,7 @@ export const CastCrewDirectory: React.FC<CastCrewDirectoryProps> = ({
           }
           onUpdateRelationships={(rels) => onUpdateCharacterRelationships?.(rels)}
           onUpdateNodePositions={(pos) => onUpdateCharacterNodePositions?.(pos)}
+          onUpdateEdgePositions={(pos) => onUpdateCharacterEdgePositions?.(pos)}
           onSelectScene={onSelectScene}
         />
       ) : directoryView === 'timeline' ? (
@@ -835,6 +862,10 @@ export const CastCrewDirectory: React.FC<CastCrewDirectoryProps> = ({
           members={members}
           scenes={scenes}
           strips={strips}
+          equipmentManifest={equipmentManifest}
+          financeSettings={financeSettings}
+          onUpdateFinanceSettings={onUpdateFinanceSettings}
+          onRecalculateFinances={onRecalculateFinances}
           onEditMember={(member) => openEditModal(member)}
           onSelectMember={(memberId) => {
             setSelectedMemberId(memberId);

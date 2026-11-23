@@ -1,5 +1,16 @@
 import React from 'react';
-import { Home, Mail, Settings, HelpCircle, LogOut, Maximize2, Film, Calendar, Terminal, Camera, BookOpen, MonitorPlay } from 'lucide-react';
+import {
+  Home,
+  HelpCircle,
+  Maximize2,
+  Film,
+  Calendar,
+  Camera,
+  Users,
+  ListTree,
+  GitPullRequest,
+  MonitorPlay,
+} from 'lucide-react';
 import { ActiveWorkspace } from '../types/story';
 import { BrandIcon } from './BrandIcon';
 
@@ -8,31 +19,50 @@ interface TopHeaderProps {
   onSelectWorkspace: (workspace: ActiveWorkspace) => void;
   projectTitle: string;
   onOpenTeleprompter?: () => void;
-  unreadCount?: number;
-  userName?: string;
+  onOpenHelp?: () => void;
+  pendingCollaborationCount?: number;
 }
 
 export const TopHeader: React.FC<TopHeaderProps> = ({
   activeWorkspace,
   onSelectWorkspace,
   projectTitle,
-  onOpenTeleprompter,
-  unreadCount = 19,
-  userName = 'Jeffrey (Online)',
+  onOpenHelp,
+  pendingCollaborationCount = 0,
 }) => {
+  const navItems: {
+    id: ActiveWorkspace;
+    label: string;
+    icon: React.ReactNode;
+    badge?: number;
+  }[] = [
+    { id: 'authoring', label: 'AUTHORING', icon: <Film className="w-3.5 h-3.5" /> },
+    { id: 'characters', label: 'CHARACTERS', icon: <Users className="w-3.5 h-3.5" /> },
+    { id: 'outline', label: 'OUTLINE', icon: <ListTree className="w-3.5 h-3.5" /> },
+    { id: 'production', label: 'PRODUCTION', icon: <Calendar className="w-3.5 h-3.5" /> },
+    { id: 'storyboard', label: 'STORYBOARDING', icon: <Camera className="w-3.5 h-3.5" /> },
+    {
+      id: 'collaboration',
+      label: 'COLLABORATION',
+      icon: <GitPullRequest className="w-3.5 h-3.5" />,
+      badge: pendingCollaborationCount,
+    },
+    { id: 'teleprompter', label: 'TELEPROMPTER', icon: <MonitorPlay className="w-3.5 h-3.5" /> },
+  ];
+
   return (
     <header className="bg-[#1f1f1f] border-b border-[#383838] select-none text-xs">
-      <div className="flex items-center justify-between px-3 h-10">
-        {/* Brand & Left Navigation */}
-        <div className="flex items-center space-x-3">
+      <div className="flex items-center justify-between px-3 h-10 gap-2">
+        {/* Brand & Primary 7-Workspace Navigation */}
+        <div className="flex items-center space-x-2 min-w-0 overflow-x-auto no-scrollbar">
           {/* ScreenCraft Brand Icon & Name */}
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-2 shrink-0 pr-1">
             <BrandIcon size="sm" />
-            <div className="flex items-baseline space-x-1.5">
+            <div className="flex items-baseline space-x-1">
               <span className="font-bold text-gray-100 tracking-wider text-sm font-sans whitespace-nowrap">
                 SCREENCRAFT
               </span>
-              <span className="text-[10px] font-bold text-[#ff7700] uppercase tracking-wider px-1 bg-[#2e1d0c] rounded border border-[#ff7700]/30">
+              <span className="text-[10px] font-bold text-[#ff7700] uppercase tracking-wider">
                 STUDIO
               </span>
             </div>
@@ -41,135 +71,65 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
           {/* Home Icon */}
           <button
             onClick={() => onSelectWorkspace('projects')}
-            title="Projects Home"
-            className="p-1.5 text-gray-400 hover:text-white hover:bg-[#2f2f2f] rounded transition-colors"
+            title="Home (Authoring & Production Templates)"
+            aria-label="Home"
+            className={`p-1.5 rounded transition-colors shrink-0 ${
+              activeWorkspace === 'projects'
+                ? 'bg-[#2e1e0f] text-[#ff8000] border border-[#ff7700]/60'
+                : 'text-gray-400 hover:text-white hover:bg-[#2f2f2f]'
+            }`}
           >
             <Home className="w-4 h-4" />
           </button>
 
-          {/* Primary View Switcher Tabs */}
-          <nav className="flex items-center space-x-1 ml-2">
-            <button
-              onClick={() => onSelectWorkspace('projects')}
-              className={`px-2.5 py-1.5 font-semibold text-xs tracking-wide transition-colors rounded-t whitespace-nowrap shrink-0 ${
-                activeWorkspace === 'projects'
-                  ? 'text-[#ff8000] border-b-2 border-[#ff8000] bg-[#292929]'
-                  : 'text-gray-400 hover:text-gray-200 hover:bg-[#2a2a2a]'
-              }`}
-            >
-              PROJECTS
-            </button>
-            <button
-              onClick={() => onSelectWorkspace('authoring')}
-              className={`px-2.5 py-1.5 font-semibold text-xs tracking-wide transition-colors rounded-t flex items-center space-x-1.5 whitespace-nowrap shrink-0 ${
-                activeWorkspace === 'authoring'
-                  ? 'text-[#ff8000] border-b-2 border-[#ff8000] bg-[#292929]'
-                  : 'text-gray-400 hover:text-gray-200 hover:bg-[#2a2a2a]'
-              }`}
-            >
-              <Film className="w-3.5 h-3.5" />
-              <span>AUTHORING</span>
-            </button>
-            <button
-              onClick={() => onSelectWorkspace('project_bible')}
-              className={`px-2.5 py-1.5 font-semibold text-xs tracking-wide transition-colors rounded-t flex items-center space-x-1.5 whitespace-nowrap shrink-0 ${
-                activeWorkspace === 'project_bible'
-                  ? 'text-[#ff8000] border-b-2 border-[#ff8000] bg-[#292929]'
-                  : 'text-gray-400 hover:text-gray-200 hover:bg-[#2a2a2a]'
-              }`}
-            >
-              <BookOpen className="w-3.5 h-3.5" />
-              <span>PROJECT BIBLE</span>
-            </button>
-            <button
-              onClick={() => onSelectWorkspace('production')}
-              className={`px-2.5 py-1.5 font-semibold text-xs tracking-wide transition-colors rounded-t flex items-center space-x-1.5 whitespace-nowrap shrink-0 ${
-                activeWorkspace === 'production'
-                  ? 'text-[#ff8000] border-b-2 border-[#ff8000] bg-[#292929]'
-                  : 'text-gray-400 hover:text-gray-200 hover:bg-[#2a2a2a]'
-              }`}
-            >
-              <Calendar className="w-3.5 h-3.5" />
-              <span>PRODUCTION SCHEDULE</span>
-            </button>
-            <button
-              onClick={() => onSelectWorkspace('storyboard')}
-              className={`px-2.5 py-1.5 font-semibold text-xs tracking-wide transition-colors rounded-t flex items-center space-x-1.5 whitespace-nowrap shrink-0 ${
-                activeWorkspace === 'storyboard'
-                  ? 'text-[#ff8000] border-b-2 border-[#ff8000] bg-[#292929]'
-                  : 'text-gray-400 hover:text-gray-200 hover:bg-[#2a2a2a]'
-              }`}
-            >
-              <Camera className="w-3.5 h-3.5" />
-              <span>STORYBOARD</span>
-            </button>
-            <button
-              onClick={() => onSelectWorkspace('rust_engine')}
-              className={`px-2.5 py-1.5 font-semibold text-xs tracking-wide transition-colors rounded-t flex items-center space-x-1.5 whitespace-nowrap shrink-0 ${
-                activeWorkspace === 'rust_engine'
-                  ? 'text-[#ff8000] border-b-2 border-[#ff8000] bg-[#292929]'
-                  : 'text-gray-400 hover:text-gray-200 hover:bg-[#2a2a2a]'
-              }`}
-            >
-              <Terminal className="w-3.5 h-3.5 text-[#ff8000]" />
-              <span>RUST DESKTOP</span>
-            </button>
+          {/* 7 Primary Workspaces */}
+          <nav className="flex items-center space-x-0.5 ml-1">
+            {navItems.map((item) => {
+              const isActive = activeWorkspace === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => onSelectWorkspace(item.id)}
+                  className={`px-2.5 py-1.5 font-semibold text-[11px] tracking-wide transition-colors rounded-t flex items-center space-x-1.5 whitespace-nowrap shrink-0 ${
+                    isActive
+                      ? 'text-[#ff8000] border-b-2 border-[#ff8000] bg-[#292929]'
+                      : 'text-gray-400 hover:text-gray-200 hover:bg-[#2a2a2a]'
+                  }`}
+                >
+                  {item.icon}
+                  <span>{item.label}</span>
+                  {item.badge !== undefined && item.badge > 0 && (
+                    <span className="text-[10px] font-mono tabular-nums text-cyan-300">
+                      ({item.badge})
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </nav>
         </div>
 
-        {/* User, Notifications & System Controls */}
-        <div className="flex items-center space-x-3 text-gray-300">
-          {onOpenTeleprompter && (
-            <button
-              onClick={onOpenTeleprompter}
-              className="flex items-center space-x-1.5 px-2.5 py-1 rounded bg-[#141414] hover:bg-black text-white border border-[#444] hover:border-[#ff7700] transition-colors whitespace-nowrap shrink-0"
-              title="Open Dedicated Teleprompter Window for Filming"
-            >
-              <MonitorPlay className="w-3.5 h-3.5 text-[#ff7700]" />
-              <span className="font-semibold">Teleprompter</span>
-            </button>
-          )}
-
-          {/* User Online Status */}
-          <div className="flex items-center space-x-1.5 text-xs text-gray-300 bg-[#292929] px-2.5 py-1 rounded border border-[#3a3a3a]">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span>Hi, {userName}</span>
-          </div>
-
-          {/* Inbox / Notification */}
-          <div className="flex items-center space-x-1 text-xs text-amber-400 cursor-pointer hover:text-amber-300 bg-[#2e2617] px-2 py-1 rounded border border-amber-600/30">
-            <Mail className="w-3.5 h-3.5" />
-            <span>({unreadCount})</span>
-          </div>
-
-          <div className="h-4 w-px bg-[#3e3e3e]"></div>
-
-          <button
-            onClick={() => onSelectWorkspace('rust_engine')}
-            className="flex items-center space-x-1 text-gray-400 hover:text-white transition-colors"
-            title="Desktop Preferences"
+        {/* Right Document Context & System Controls */}
+        <div className="flex items-center space-x-2.5 text-gray-300 shrink-0">
+          <span
+            className="hidden xl:inline text-[11px] text-gray-400 truncate max-w-[160px]"
+            title={projectTitle}
           >
-            <Settings className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Preferences</span>
-          </button>
+            {projectTitle}
+          </span>
+
+          <div className="h-4 w-px bg-[#3e3e3e] hidden xl:block" />
 
           <button
-            className="flex items-center space-x-1 text-gray-400 hover:text-white transition-colors"
-            title="ScreenCraft Help"
+            onClick={() => onOpenHelp?.()}
+            className="flex items-center space-x-1 text-gray-400 hover:text-white transition-colors whitespace-nowrap shrink-0"
+            title="ScreenCraft Interactive Help Guide"
           >
             <HelpCircle className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Help</span>
+            <span className="hidden sm:inline text-[11px]">Help</span>
           </button>
 
-          <button
-            className="flex items-center space-x-1 text-gray-400 hover:text-red-400 transition-colors"
-            title="Sign out"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Sign out</span>
-          </button>
-
-          <div className="h-4 w-px bg-[#3e3e3e]"></div>
+          <div className="h-4 w-px bg-[#3e3e3e]" />
 
           <button
             onClick={() => {
@@ -179,7 +139,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                 document.exitFullscreen().catch(() => {});
               }
             }}
-            className="p-1 text-gray-400 hover:text-white hover:bg-[#333] rounded"
+            className="p-1 text-gray-400 hover:text-white hover:bg-[#333] rounded shrink-0"
             title="Toggle Fullscreen"
           >
             <Maximize2 className="w-3.5 h-3.5" />

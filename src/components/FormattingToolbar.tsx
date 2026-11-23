@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Bold,
   Italic,
@@ -7,10 +7,8 @@ import {
   AlignLeft,
   AlignCenter,
   AlignRight,
-  AlignJustify,
   Highlighter,
   Sigma,
-  GitCompare,
   FileText,
   RefreshCw,
   Columns,
@@ -26,14 +24,59 @@ import {
   Maximize2,
   Minimize2,
   StickyNote,
+  ChevronDown,
+  ListTree,
+  ArrowUpDown,
+  SpellCheck,
+  BookCheck,
+  Users,
+  Bookmark,
+  LayoutTemplate,
 } from 'lucide-react';
-import { ElementType, ActiveWorkspace, ScriptFormatMode } from '../types/story';
+import {
+  ElementType,
+  ActiveWorkspace,
+  ScriptFormatMode,
+  ElementTextAlign,
+  HighlightColor,
+  EditorTypographySettings,
+  PageLayoutOption,
+} from '../types/story';
 import { RevisionPassCounts } from '../utils/revisionPass';
+import {
+  DEFAULT_EDITOR_TYPOGRAPHY,
+  EffectiveElementFormatting,
+  HIGHLIGHT_COLORS,
+  LINE_SPACING_OPTIONS,
+  PAGE_LAYOUT_OPTIONS,
+  SCREENPLAY_ELEMENTS_META,
+  SCRIPT_FONT_FAMILIES,
+  SCRIPT_FONT_SIZES,
+  getElementMeta,
+} from '../utils/screenplayFormatting';
 
 interface FormattingToolbarProps {
   activeWorkspace: ActiveWorkspace;
   currentElementType: ElementType;
   onChangeElementType: (type: ElementType) => void;
+  effectiveFormatting: EffectiveElementFormatting;
+  editorTypography?: EditorTypographySettings;
+  onToggleBold: () => void;
+  onToggleItalic: () => void;
+  onToggleUnderline: () => void;
+  onToggleStrikethrough: () => void;
+  onSetHighlight: (color: HighlightColor) => void;
+  onSetAlign: (align: ElementTextAlign) => void;
+  onChangeFontFamily: (fontFamily: string) => void;
+  onChangeFontSize: (fontSizePt: number) => void;
+  onChangeLineSpacing: (lineSpacing: number) => void;
+  onChangePageLayout?: (pageLayout: PageLayoutOption) => void;
+  onOpenSpellCheck?: () => void;
+  onOpenGrammarCheck?: () => void;
+  onOpenDraftRevisions?: () => void;
+  onOpenCharacterInfo?: () => void;
+  proofreadCounts?: { spelling: number; grammar: number };
+  onOpenElementsPopup?: () => void;
   documentTitle: string;
   isModified?: boolean;
   onRecalculate?: () => void;
@@ -65,6 +108,24 @@ export const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
   activeWorkspace,
   currentElementType,
   onChangeElementType,
+  effectiveFormatting,
+  editorTypography = DEFAULT_EDITOR_TYPOGRAPHY,
+  onToggleBold,
+  onToggleItalic,
+  onToggleUnderline,
+  onToggleStrikethrough,
+  onSetHighlight,
+  onSetAlign,
+  onChangeFontFamily,
+  onChangeFontSize,
+  onChangeLineSpacing,
+  onChangePageLayout,
+  onOpenSpellCheck,
+  onOpenGrammarCheck,
+  onOpenDraftRevisions,
+  onOpenCharacterInfo,
+  proofreadCounts,
+  onOpenElementsPopup,
   documentTitle,
   isModified = true,
   onRecalculate,
@@ -92,6 +153,53 @@ export const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
   onChangeZoom,
 }) => {
   const isCenterMaximized = isLeftPanelCollapsed && isRightPanelCollapsed;
+  const isAuthoring = activeWorkspace === 'authoring';
+
+  const [lastHighlightColor, setLastHighlightColor] = useState<HighlightColor>('yellow');
+  const [highlightMenuPos, setHighlightMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const highlightTriggerRef = useRef<HTMLButtonElement>(null);
+  const highlightMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (effectiveFormatting.highlight !== 'none') {
+      setLastHighlightColor(effectiveFormatting.highlight);
+    }
+  }, [effectiveFormatting.highlight]);
+
+  useEffect(() => {
+    if (!highlightMenuPos) return;
+    const handleOutside = (e: MouseEvent) => {
+      if (
+        highlightMenuRef.current &&
+        !highlightMenuRef.current.contains(e.target as Node) &&
+        highlightTriggerRef.current &&
+        !highlightTriggerRef.current.contains(e.target as Node)
+      ) {
+        setHighlightMenuPos(null);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, [highlightMenuPos]);
+
+  const currentHighlightOption =
+    HIGHLIGHT_COLORS.find((h) => h.id === effectiveFormatting.highlight) || HIGHLIGHT_COLORS[0];
+
+  const activeMeta = getElementMeta(currentElementType);
+
+  const toggleHighlightPopover = () => {
+    if (highlightMenuPos) {
+      setHighlightMenuPos(null);
+      return;
+    }
+    const rect = highlightTriggerRef.current?.getBoundingClientRect();
+    if (rect) {
+      setHighlightMenuPos({
+        top: rect.bottom + 4,
+        left: Math.max(8, Math.min(window.innerWidth - 180, rect.left - 24)),
+      });
+    }
+  };
 
   return (
     <div className="bg-[#2e2e2e] border-b border-[#3e3e3e] flex flex-col text-xs select-none">
@@ -162,7 +270,7 @@ export const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
                 <span className="hidden sm:inline">Inspector</span>
               </button>
             )}
-            {activeWorkspace === 'authoring' && onToggleQuickNotes && (
+            {isAuthoring && onToggleQuickNotes && (
               <button
                 type="button"
                 onClick={onToggleQuickNotes}
@@ -186,118 +294,291 @@ export const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
       </div>
 
       {/* Main Formatting & Action Ribbon */}
-      <div className="flex items-center justify-between px-3 py-1.5 h-10 overflow-x-auto">
-        {/* Left Side: Element Formatting & Type Selector */}
-        <div className="flex items-center space-x-2">
-          {/* Element Type Dropdown */}
-          <div className="flex items-center bg-[#1e1e1e] border border-[#444444] rounded px-2 py-1">
-            <span className="text-[11px] text-gray-400 mr-1.5">Format:</span>
+      <div className="flex items-center justify-between px-3 py-1.5 min-h-[40px] gap-2 overflow-x-auto">
+        {/* Left Side: Element Formatting, Typography, Styles, Alignment & Line Spacing */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {/* Elements Shortcut Menu Trigger + Format Dropdown */}
+          <div className="flex items-center bg-[#1e1e1e] border border-[#444444] rounded px-1.5 py-0.5 gap-1">
+            {isAuthoring && onOpenElementsPopup && (
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={onOpenElementsPopup}
+                title="Open Elements Shortcut Menu (Ctrl+/ or Enter on empty line)"
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-[#2a2a2a] hover:bg-[#383838] border border-[#4a4a4a] text-[11px] font-mono text-amber-300 transition-colors whitespace-nowrap shrink-0"
+              >
+                <ListTree className="w-3 h-3 text-[#ff8000]" />
+                <span>[{activeMeta.shortcutKey}]</span>
+              </button>
+            )}
             <select
               value={currentElementType}
+              disabled={!isAuthoring}
               onChange={(e) => onChangeElementType(e.target.value as ElementType)}
-              className="bg-transparent text-xs font-semibold text-[#ff8000] focus:outline-none cursor-pointer"
+              aria-label="Screenplay element format"
+              title="Change focused element format (or press Ctrl+/ for Elements menu)"
+              className="bg-transparent text-xs font-semibold text-[#ff8000] focus:outline-none cursor-pointer disabled:opacity-50"
             >
-              <option value="SCENE_HEADING" className="bg-[#222] text-gray-200">
-                Scene Heading (INT./EXT.)
-              </option>
-              <option value="ACTION" className="bg-[#222] text-gray-200">
-                Action
-              </option>
-              <option value="CHARACTER" className="bg-[#222] text-gray-200">
-                Character
-              </option>
-              <option value="DIALOGUE" className="bg-[#222] text-gray-200">
-                Dialogue
-              </option>
-              <option value="VOICE_OVER" className="bg-[#222] text-violet-300">
-                Voice-over (V.O.)
-              </option>
-              <option value="PARENTHETICAL" className="bg-[#222] text-gray-200">
-                Parenthetical
-              </option>
-              <option value="TRANSITION" className="bg-[#222] text-gray-200">
-                Transition
-              </option>
-              <option value="SHOT" className="bg-[#222] text-gray-200">
-                Shot (Camera Marker)
-              </option>
-              <option value="GENERAL" className="bg-[#222] text-gray-200">
-                General
-              </option>
+              {SCREENPLAY_ELEMENTS_META.map((meta) => (
+                <option key={meta.type} value={meta.type} className="bg-[#222] text-gray-200">
+                  [{meta.shortcutKey}] {meta.label}
+                </option>
+              ))}
             </select>
           </div>
 
-          {/* Font Family & Size */}
-          <div className="flex items-center space-x-1 bg-[#1e1e1e] border border-[#444444] rounded px-2 py-1 text-gray-300">
-            <span className="font-mono text-xs text-amber-200">Courier Std</span>
-            <span className="text-gray-500 text-[10px]">|</span>
-            <span className="text-xs text-gray-300">12 pt</span>
+          {/* Font Family & Size Selectors */}
+          <div className="flex items-center bg-[#1e1e1e] border border-[#444444] rounded px-1.5 py-0.5 gap-1 text-gray-200">
+            <select
+              value={effectiveFormatting.fontFamily || editorTypography.fontFamily}
+              disabled={!isAuthoring}
+              onChange={(e) => onChangeFontFamily(e.target.value)}
+              aria-label="Font family"
+              title="Script font style"
+              className="bg-transparent text-xs text-amber-200 font-medium focus:outline-none cursor-pointer max-w-[116px] disabled:opacity-50"
+            >
+              {SCRIPT_FONT_FAMILIES.map((font) => (
+                <option key={font.id} value={font.id} className="bg-[#222] text-gray-200">
+                  {font.label}
+                </option>
+              ))}
+            </select>
+            <span className="text-gray-600 text-[10px]">|</span>
+            <select
+              value={effectiveFormatting.fontSizePt || editorTypography.fontSizePt}
+              disabled={!isAuthoring}
+              onChange={(e) => onChangeFontSize(Number(e.target.value))}
+              aria-label="Font size"
+              title="Script font size (pt)"
+              className="bg-transparent text-xs text-gray-200 tabular-nums focus:outline-none cursor-pointer disabled:opacity-50"
+            >
+              {SCRIPT_FONT_SIZES.map((pt) => (
+                <option key={pt} value={pt} className="bg-[#222] text-gray-200">
+                  {pt} pt
+                </option>
+              ))}
+            </select>
           </div>
 
-          <div className="h-5 w-px bg-[#444444] mx-1"></div>
+          <div className="h-5 w-px bg-[#444444]" />
 
-          {/* Typography Controls */}
+          {/* Text Formatting Controls: Bold, Italic, Underline, Strikethrough, Highlight */}
           <div className="flex items-center space-x-0.5 bg-[#242424] p-0.5 rounded border border-[#3e3e3e]">
             <button
-              title="Bold"
-              className="p-1.5 text-gray-300 hover:text-white hover:bg-[#383838] rounded"
+              type="button"
+              disabled={!isAuthoring}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={onToggleBold}
+              title="Bold (Ctrl+B)"
+              aria-label="Bold"
+              aria-pressed={effectiveFormatting.bold}
+              className={`p-1.5 rounded transition-colors ${
+                effectiveFormatting.bold
+                  ? 'bg-[#ff7700] text-black font-bold'
+                  : 'text-gray-300 hover:text-white hover:bg-[#383838]'
+              } disabled:opacity-40`}
             >
               <Bold className="w-3.5 h-3.5" />
             </button>
             <button
-              title="Italic"
-              className="p-1.5 text-gray-300 hover:text-white hover:bg-[#383838] rounded"
+              type="button"
+              disabled={!isAuthoring}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={onToggleItalic}
+              title="Italic (Ctrl+I)"
+              aria-label="Italic"
+              aria-pressed={effectiveFormatting.italic}
+              className={`p-1.5 rounded transition-colors ${
+                effectiveFormatting.italic
+                  ? 'bg-[#ff7700] text-black'
+                  : 'text-gray-300 hover:text-white hover:bg-[#383838]'
+              } disabled:opacity-40`}
             >
               <Italic className="w-3.5 h-3.5" />
             </button>
             <button
-              title="Underline"
-              className="p-1.5 text-gray-300 hover:text-white hover:bg-[#383838] rounded"
+              type="button"
+              disabled={!isAuthoring}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={onToggleUnderline}
+              title="Underline (Ctrl+U)"
+              aria-label="Underline"
+              aria-pressed={effectiveFormatting.underline}
+              className={`p-1.5 rounded transition-colors ${
+                effectiveFormatting.underline
+                  ? 'bg-[#ff7700] text-black'
+                  : 'text-gray-300 hover:text-white hover:bg-[#383838]'
+              } disabled:opacity-40`}
             >
               <Underline className="w-3.5 h-3.5" />
             </button>
             <button
-              title="Strikethrough"
-              className="p-1.5 text-gray-300 hover:text-white hover:bg-[#383838] rounded"
+              type="button"
+              disabled={!isAuthoring}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={onToggleStrikethrough}
+              title="Strikethrough (Ctrl+Shift+X)"
+              aria-label="Strikethrough"
+              aria-pressed={effectiveFormatting.strikethrough}
+              className={`p-1.5 rounded transition-colors ${
+                effectiveFormatting.strikethrough
+                  ? 'bg-[#ff7700] text-black'
+                  : 'text-gray-300 hover:text-white hover:bg-[#383838]'
+              } disabled:opacity-40`}
             >
               <Strikethrough className="w-3.5 h-3.5" />
             </button>
-            <button
-              title="Highlight Note"
-              className="p-1.5 text-amber-400 hover:text-amber-300 hover:bg-[#383838] rounded"
-            >
-              <Highlighter className="w-3.5 h-3.5" />
-            </button>
+
+            {/* Highlight Toggle + Color Swatch Picker */}
+            <div className="flex items-center">
+              <button
+                type="button"
+                disabled={!isAuthoring}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() =>
+                  onSetHighlight(
+                    effectiveFormatting.highlight === 'none' ? lastHighlightColor : 'none'
+                  )
+                }
+                title="Highlight Element (Ctrl+Shift+H)"
+                aria-label="Toggle Highlight"
+                aria-pressed={effectiveFormatting.highlight !== 'none'}
+                className={`p-1.5 rounded-l transition-colors flex flex-col items-center justify-center ${
+                  effectiveFormatting.highlight !== 'none'
+                    ? 'bg-[#3b331d] text-amber-200'
+                    : 'text-amber-400 hover:text-amber-300 hover:bg-[#383838]'
+                } disabled:opacity-40`}
+              >
+                <Highlighter className="w-3.5 h-3.5" />
+                <span
+                  className="w-3.5 h-0.5 rounded-full mt-0.5"
+                  style={{
+                    backgroundColor:
+                      effectiveFormatting.highlight !== 'none'
+                        ? currentHighlightOption.swatchHex
+                        : HIGHLIGHT_COLORS.find((h) => h.id === lastHighlightColor)?.swatchHex ||
+                          '#fde047',
+                  }}
+                />
+              </button>
+              <button
+                ref={highlightTriggerRef}
+                type="button"
+                disabled={!isAuthoring}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={toggleHighlightPopover}
+                title="Choose Highlight Color"
+                aria-label="Choose Highlight Color"
+                className="px-0.5 py-1.5 rounded-r text-gray-400 hover:text-white hover:bg-[#383838] disabled:opacity-40"
+              >
+                <ChevronDown className="w-2.5 h-2.5" />
+              </button>
+            </div>
           </div>
 
-          {/* Alignment Controls */}
+          {/* Alignment Controls: Left, Center, Right */}
           <div className="flex items-center space-x-0.5 bg-[#242424] p-0.5 rounded border border-[#3e3e3e]">
             <button
-              title="Align Left"
-              className="p-1.5 text-gray-300 hover:text-white hover:bg-[#383838] rounded"
+              type="button"
+              disabled={!isAuthoring}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onSetAlign('left')}
+              title="Align Left (Ctrl+Shift+L)"
+              aria-label="Align Left"
+              aria-pressed={effectiveFormatting.align === 'left'}
+              className={`p-1.5 rounded transition-colors ${
+                effectiveFormatting.align === 'left'
+                  ? 'bg-[#ff7700] text-black'
+                  : 'text-gray-300 hover:text-white hover:bg-[#383838]'
+              } disabled:opacity-40`}
             >
               <AlignLeft className="w-3.5 h-3.5" />
             </button>
             <button
-              title="Align Center"
-              className="p-1.5 text-gray-300 hover:text-white hover:bg-[#383838] rounded"
+              type="button"
+              disabled={!isAuthoring}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onSetAlign('center')}
+              title="Align Center (Ctrl+Shift+C)"
+              aria-label="Align Center"
+              aria-pressed={effectiveFormatting.align === 'center'}
+              className={`p-1.5 rounded transition-colors ${
+                effectiveFormatting.align === 'center'
+                  ? 'bg-[#ff7700] text-black'
+                  : 'text-gray-300 hover:text-white hover:bg-[#383838]'
+              } disabled:opacity-40`}
             >
               <AlignCenter className="w-3.5 h-3.5" />
             </button>
             <button
-              title="Align Right"
-              className="p-1.5 text-gray-300 hover:text-white hover:bg-[#383838] rounded"
+              type="button"
+              disabled={!isAuthoring}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onSetAlign('right')}
+              title="Align Right (Ctrl+Shift+R)"
+              aria-label="Align Right"
+              aria-pressed={effectiveFormatting.align === 'right'}
+              className={`p-1.5 rounded transition-colors ${
+                effectiveFormatting.align === 'right'
+                  ? 'bg-[#ff7700] text-black'
+                  : 'text-gray-300 hover:text-white hover:bg-[#383838]'
+              } disabled:opacity-40`}
             >
               <AlignRight className="w-3.5 h-3.5" />
             </button>
           </div>
+
+          {/* Line Spacing Control */}
+          <div
+            className="flex items-center bg-[#1e1e1e] border border-[#444444] rounded px-1.5 py-0.5 gap-1 text-gray-300"
+            title="Line Spacing"
+          >
+            <ArrowUpDown className="w-3 h-3 text-amber-400 shrink-0" />
+            <select
+              value={effectiveFormatting.lineSpacing || editorTypography.lineSpacing}
+              disabled={!isAuthoring}
+              onChange={(e) => onChangeLineSpacing(Number(e.target.value))}
+              aria-label="Line spacing"
+              className="bg-transparent text-xs text-gray-200 tabular-nums focus:outline-none cursor-pointer disabled:opacity-50"
+            >
+              {LINE_SPACING_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value} className="bg-[#222] text-gray-200">
+                  {opt.label}× ({opt.description})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Page Layout Control */}
+          {onChangePageLayout && (
+            <div
+              className="flex items-center bg-[#1e1e1e] border border-[#444444] rounded px-1.5 py-0.5 gap-1 text-gray-300"
+              title="Page Layout & Margin Width"
+            >
+              <LayoutTemplate className="w-3 h-3 text-cyan-400 shrink-0" />
+              <select
+                value={editorTypography.pageLayout || 'letter'}
+                disabled={!isAuthoring}
+                onChange={(e) => onChangePageLayout(e.target.value as PageLayoutOption)}
+                aria-label="Page layout"
+                className="bg-transparent text-xs text-gray-200 focus:outline-none cursor-pointer disabled:opacity-50"
+              >
+                {PAGE_LAYOUT_OPTIONS.map((layout) => (
+                  <option key={layout.id} value={layout.id} className="bg-[#222] text-gray-200">
+                    {layout.shortLabel}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
-        {/* Right Side: Adobe Story Production, NLE Pipeline & Sync Ribbon */}
+        {/* Right Side: Script Format, Sync, Continuity, NLE Pipeline & Zoom */}
         <div className="flex items-center space-x-2 shrink-0">
-          {activeWorkspace === 'authoring' && onChangeScriptFormat && (
+          {isAuthoring && onChangeScriptFormat && (
             <div className="flex items-center p-0.5 bg-[#1b1b1b] border border-[#444444] rounded">
               <button
+                type="button"
                 onClick={() => onChangeScriptFormat('single_column_film')}
                 className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] transition-colors whitespace-nowrap shrink-0 ${
                   scriptFormat === 'single_column_film'
@@ -310,6 +591,7 @@ export const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
                 <span>Film</span>
               </button>
               <button
+                type="button"
                 onClick={() => onChangeScriptFormat('av_multi_column')}
                 className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] transition-colors whitespace-nowrap shrink-0 ${
                   scriptFormat === 'av_multi_column'
@@ -326,6 +608,7 @@ export const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
 
           {onOpenRevisionImpact && (
             <button
+              type="button"
               onClick={onOpenRevisionImpact}
               className={`flex items-center space-x-1.5 px-2.5 py-1 rounded border transition-colors whitespace-nowrap shrink-0 ${
                 pendingSyncCount > 0
@@ -343,6 +626,7 @@ export const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
 
           {onOpenContinuityCheck && (
             <button
+              type="button"
               onClick={onOpenContinuityCheck}
               className={`flex items-center space-x-1.5 px-2.5 py-1 rounded border transition-colors whitespace-nowrap shrink-0 ${
                 continuityAlertCount > 0
@@ -366,6 +650,7 @@ export const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
 
           {onOpenNLEPipeline && (
             <button
+              type="button"
               onClick={onOpenNLEPipeline}
               className="flex items-center space-x-1.5 px-2.5 py-1 bg-[#242424] hover:bg-[#353535] text-cyan-300 rounded border border-[#444444] transition-colors whitespace-nowrap shrink-0"
               title="Script-to-NLE Premiere Pro XML & Speech-to-Text Take Aligner"
@@ -377,6 +662,7 @@ export const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
 
           {onOpenTeleprompter && (
             <button
+              type="button"
               onClick={onOpenTeleprompter}
               className="flex items-center space-x-1.5 px-2.5 py-1 bg-[#141414] hover:bg-black text-white rounded border border-[#444444] hover:border-[#ff7700] transition-colors whitespace-nowrap shrink-0"
               title="Launch Dedicated Teleprompter Window (White on Black)"
@@ -388,6 +674,7 @@ export const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
 
           {onRecalculate && (
             <button
+              type="button"
               onClick={onRecalculate}
               className="flex items-center space-x-1.5 px-2.5 py-1 bg-[#242424] hover:bg-[#353535] text-amber-400 rounded border border-[#444444] transition-colors whitespace-nowrap shrink-0"
               title="Recalculate 1/8th Page Counts"
@@ -399,6 +686,7 @@ export const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
 
           {activeWorkspace === 'production' && onAddBreak && (
             <button
+              type="button"
               onClick={onAddBreak}
               className="flex items-center space-x-1 px-2.5 py-1 bg-[#242424] hover:bg-[#353535] text-emerald-400 rounded border border-[#444444] transition-colors whitespace-nowrap shrink-0"
               title="Add Day Break / Meal Banner"
@@ -409,6 +697,7 @@ export const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
           )}
 
           <button
+            type="button"
             onClick={onOpenReports}
             className="flex items-center space-x-1 px-2.5 py-1 bg-[#242424] hover:bg-[#353535] text-gray-300 rounded border border-[#444444] transition-colors whitespace-nowrap shrink-0"
             title="Production Reports"
@@ -434,14 +723,57 @@ export const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
         </div>
       </div>
 
-      {/* Revision Pass Toggle & Color Legend Strip (Authoring Workspace) */}
-      {activeWorkspace === 'authoring' && onToggleRevisionPassMode && (
-        <div className="bg-[#252525] border-t border-[#383838] px-3 py-1 flex flex-wrap items-center justify-between gap-3 text-[11px]">
-          <div className="flex items-center gap-3">
+      {/* Fixed-position Highlight Color Swatch Popover */}
+      {highlightMenuPos && (
+        <div
+          ref={highlightMenuRef}
+          style={{ top: highlightMenuPos.top, left: highlightMenuPos.left }}
+          className="fixed z-50 w-44 bg-[#202020] border border-[#454545] rounded-md shadow-2xl p-2 space-y-1.5"
+        >
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 px-1">
+            Highlight Color
+          </div>
+          <div className="grid grid-cols-1 gap-1">
+            {HIGHLIGHT_COLORS.map((opt) => {
+              const isSelected = effectiveFormatting.highlight === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    onSetHighlight(opt.id);
+                    if (opt.id !== 'none') setLastHighlightColor(opt.id);
+                    setHighlightMenuPos(null);
+                  }}
+                  className={`flex items-center gap-2 px-2 py-1 rounded text-xs transition-colors ${
+                    isSelected
+                      ? 'bg-[#353535] text-white font-semibold'
+                      : 'text-gray-300 hover:bg-[#2c2c2c]'
+                  }`}
+                >
+                  <span
+                    className="w-3.5 h-3.5 rounded-xs border border-gray-500/70 shrink-0"
+                    style={{
+                      backgroundColor: opt.id === 'none' ? '#1a1a1a' : opt.swatchHex,
+                    }}
+                  />
+                  <span>{opt.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Authoring QC, Proofreading, Draft Revisions, Character Info & Revision Pass Strip */}
+      {isAuthoring && onToggleRevisionPassMode && (
+        <div className="bg-[#252525] border-t border-[#383838] px-3 py-1 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+          <div className="flex items-center flex-wrap gap-2">
             <button
               type="button"
               onClick={onToggleRevisionPassMode}
-              className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded border transition-colors whitespace-nowrap shrink-0 ${
+              className={`flex items-center gap-1.5 px-2 py-0.5 rounded border transition-colors whitespace-nowrap shrink-0 ${
                 isRevisionPassMode
                   ? 'bg-[#362020] border-red-500/80 text-red-200 font-semibold'
                   : 'bg-[#1d1d1d] hover:bg-[#2c2c2c] border-[#424242] text-gray-300'
@@ -452,18 +784,75 @@ export const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
               <span>Revision Pass: {isRevisionPassMode ? 'On' : 'Off'}</span>
             </button>
 
+            {onOpenSpellCheck && (
+              <button
+                type="button"
+                onClick={onOpenSpellCheck}
+                className="flex items-center gap-1 px-2 py-0.5 rounded border bg-[#1d1d1d] hover:bg-[#2c2c2c] border-[#424242] text-gray-200 transition-colors whitespace-nowrap shrink-0 tabular-nums"
+                title="Open Spell Check in Scene Inspector (This Scene or Entire Project)"
+              >
+                <SpellCheck className="w-3.5 h-3.5 text-amber-400" />
+                <span>
+                  Spell Check
+                  {proofreadCounts && proofreadCounts.spelling > 0
+                    ? ` (${proofreadCounts.spelling})`
+                    : ''}
+                </span>
+              </button>
+            )}
+
+            {onOpenGrammarCheck && (
+              <button
+                type="button"
+                onClick={onOpenGrammarCheck}
+                className="flex items-center gap-1 px-2 py-0.5 rounded border bg-[#1d1d1d] hover:bg-[#2c2c2c] border-[#424242] text-gray-200 transition-colors whitespace-nowrap shrink-0 tabular-nums"
+                title="Open Grammar & Style Check in Scene Inspector (This Scene or Entire Project)"
+              >
+                <BookCheck className="w-3.5 h-3.5 text-cyan-400" />
+                <span>
+                  Grammar Check
+                  {proofreadCounts && proofreadCounts.grammar > 0
+                    ? ` (${proofreadCounts.grammar})`
+                    : ''}
+                </span>
+              </button>
+            )}
+
+            {onOpenDraftRevisions && (
+              <button
+                type="button"
+                onClick={onOpenDraftRevisions}
+                className="flex items-center gap-1 px-2 py-0.5 rounded border bg-[#1d1d1d] hover:bg-[#2c2c2c] border-[#424242] text-gray-200 transition-colors whitespace-nowrap shrink-0"
+                title="Inspect Draft Revisions & Lock Draft Milestones"
+              >
+                <Bookmark className="w-3.5 h-3.5 text-violet-400" />
+                <span>Draft Revisions</span>
+              </button>
+            )}
+
+            {onOpenCharacterInfo && (
+              <button
+                type="button"
+                onClick={onOpenCharacterInfo}
+                className="flex items-center gap-1 px-2 py-0.5 rounded border bg-[#1d1d1d] hover:bg-[#2c2c2c] border-[#424242] text-gray-200 transition-colors whitespace-nowrap shrink-0"
+                title="View Character Info, Bios & Line Counts for This Scene or Entire Project"
+              >
+                <Users className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Character Info</span>
+              </button>
+            )}
+
             {/* Color-Coded Legend */}
             <div
-              className={`flex items-center gap-4 transition-opacity ${
-                isRevisionPassMode ? 'opacity-100' : 'opacity-75'
+              className={`hidden xl:flex items-center gap-3 pl-2 border-l border-[#383838] transition-opacity ${
+                isRevisionPassMode ? 'opacity-100' : 'opacity-70'
               }`}
               aria-label="Revision Pass Color Legend"
             >
-              <span className="text-gray-400 hidden sm:inline">Legend:</span>
-              <span className="inline-flex items-center gap-1.5 text-gray-200 whitespace-nowrap">
-                <span className="w-2.5 h-2.5 rounded-xs bg-red-500 border border-red-300/60 shrink-0" />
+              <span className="inline-flex items-center gap-1 text-gray-200 whitespace-nowrap">
+                <span className="w-2 h-2 rounded-xs bg-red-500 shrink-0" />
                 <span>
-                  Red — Today
+                  Today
                   {revisionPassCounts !== undefined && (
                     <span className="text-red-300 font-mono tabular-nums ml-1">
                       ({revisionPassCounts.today})
@@ -471,10 +860,10 @@ export const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
                   )}
                 </span>
               </span>
-              <span className="inline-flex items-center gap-1.5 text-gray-200 whitespace-nowrap">
-                <span className="w-2.5 h-2.5 rounded-xs bg-amber-400 border border-amber-200/60 shrink-0" />
+              <span className="inline-flex items-center gap-1 text-gray-200 whitespace-nowrap">
+                <span className="w-2 h-2 rounded-xs bg-amber-400 shrink-0" />
                 <span>
-                  Yellow — This Week
+                  Week
                   {revisionPassCounts !== undefined && (
                     <span className="text-amber-300 font-mono tabular-nums ml-1">
                       ({revisionPassCounts.thisWeek})
@@ -482,10 +871,10 @@ export const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
                   )}
                 </span>
               </span>
-              <span className="inline-flex items-center gap-1.5 text-gray-300 whitespace-nowrap">
-                <span className="w-2.5 h-2.5 rounded-xs bg-gray-400 border border-gray-300/50 shrink-0" />
+              <span className="inline-flex items-center gap-1 text-gray-300 whitespace-nowrap">
+                <span className="w-2 h-2 rounded-xs bg-gray-400 shrink-0" />
                 <span>
-                  Grey — Older
+                  Older
                   {revisionPassCounts !== undefined && (
                     <span className="text-gray-400 font-mono tabular-nums ml-1">
                       ({revisionPassCounts.older})
@@ -496,10 +885,8 @@ export const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
             </div>
           </div>
 
-          <span className="text-[11px] text-gray-400 hidden md:inline">
-            {isRevisionPassMode
-              ? 'Highlighting live element edits by recency'
-              : 'Toggle Revision Pass to inspect edit recency across scenes'}
+          <span className="text-[11px] text-gray-400 hidden lg:inline">
+            Shortcuts: Enter on empty line or Ctrl+/ · Alt+[Key] · Ctrl+B/I/U
           </span>
         </div>
       )}

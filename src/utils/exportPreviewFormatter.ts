@@ -122,7 +122,23 @@ export function mapElementToFdxType(type: ElementType): string {
       return 'Transition';
     case 'SHOT':
       return 'Shot';
+    case 'CAST_LIST':
+      return 'Cast List';
+    case 'NEW_ACT':
+      return 'New Act';
+    case 'END_OF_ACT':
+      return 'End of Act';
+    case 'OUTLINE_1':
+      return 'Outline 1';
+    case 'OUTLINE_2':
+      return 'Outline 2';
+    case 'OUTLINE_3':
+      return 'Outline 3';
+    case 'NOTE':
+      return 'Note';
     case 'GENERAL':
+    case 'SEQUENCE':
+    case 'SUMMARY':
       return 'General';
     case 'ACTION':
     default:
@@ -230,7 +246,11 @@ export function paginateScreenplayForExport(
     } else if (
       el.type === 'SCENE_HEADING' ||
       el.type === 'TRANSITION' ||
-      el.type === 'SHOT'
+      el.type === 'SHOT' ||
+      el.type === 'NEW_ACT' ||
+      el.type === 'END_OF_ACT' ||
+      el.type === 'SEQUENCE' ||
+      el.type === 'CAST_LIST'
     ) {
       displayText = displayText.toUpperCase();
     }
@@ -245,10 +265,27 @@ export function paginateScreenplayForExport(
         spaceBefore = 2;
         spaceAfter = 1;
         break;
+      case 'NEW_ACT':
+      case 'END_OF_ACT':
+        maxChars = 48;
+        spaceBefore = 2;
+        spaceAfter = 2;
+        break;
+      case 'SEQUENCE':
+        maxChars = 56;
+        spaceBefore = 2;
+        spaceAfter = 1;
+        break;
       case 'ACTION':
       case 'GENERAL':
+      case 'CAST_LIST':
+      case 'SUMMARY':
+      case 'OUTLINE_1':
+      case 'OUTLINE_2':
+      case 'OUTLINE_3':
+      case 'NOTE':
         maxChars = 60;
-        spaceBefore = 0;
+        spaceBefore = el.type === 'OUTLINE_1' ? 1 : 0;
         spaceAfter = 1;
         break;
       case 'CHARACTER':

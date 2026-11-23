@@ -1,13 +1,47 @@
 export type ElementType =
+  | 'GENERAL'
   | 'SCENE_HEADING'
   | 'ACTION'
   | 'CHARACTER'
+  | 'PARENTHETICAL'
   | 'DIALOGUE'
   | 'VOICE_OVER'
-  | 'PARENTHETICAL'
   | 'TRANSITION'
   | 'SHOT'
-  | 'GENERAL';
+  | 'CAST_LIST'
+  | 'NEW_ACT'
+  | 'SEQUENCE'
+  | 'END_OF_ACT'
+  | 'SUMMARY'
+  | 'OUTLINE_1'
+  | 'OUTLINE_2'
+  | 'OUTLINE_3'
+  | 'NOTE';
+
+export type ElementTextAlign = 'left' | 'center' | 'right';
+
+export type HighlightColor = 'none' | 'yellow' | 'amber' | 'green' | 'cyan' | 'pink';
+
+export interface ElementFormatting {
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strikethrough?: boolean;
+  highlight?: HighlightColor;
+  align?: ElementTextAlign;
+  fontFamily?: string;
+  fontSizePt?: number;
+  lineSpacing?: number;
+}
+
+export type PageLayoutOption = 'letter' | 'a4' | 'compact';
+
+export interface EditorTypographySettings {
+  fontFamily: string;
+  fontSizePt: number;
+  lineSpacing: number;
+  pageLayout?: PageLayoutOption;
+}
 
 export type TagCategory =
   | 'character'
@@ -29,6 +63,7 @@ export interface ScreenplayElement {
   character?: string;
   dualDialogue?: boolean;
   lastEditedAt?: string;
+  formatting?: ElementFormatting;
 }
 
 export interface Scene {
@@ -54,6 +89,7 @@ export interface Scene {
   shootingEndDate?: string;
   shootingDuration?: string;
   scheduleNotes?: string;
+  status?: string;
 }
 
 export interface Tag {
@@ -110,6 +146,7 @@ export interface StoryCharacter {
   speakingLines: number;
   status?: string;
   image?: string;
+  description?: string;
 }
 
 export type ShotType =
@@ -261,6 +298,10 @@ export interface CharacterBreakdownOverride {
   customCostumes?: string[];
   hiddenCostumes?: string[];
   wardrobeNotes?: string;
+  roleCategory?: string;
+  characterArc?: string;
+  propsCarried?: string[];
+  vocalOrPhysicalNotes?: string;
 }
 
 // ==========================================
@@ -622,6 +663,66 @@ export interface SceneContinuityAlert {
   current: ContinuityOccurrenceRef;
 }
 
+export type EquipmentCategory =
+  | 'Camera'
+  | 'Lenses'
+  | 'Lighting & Grip'
+  | 'Sound & Soundscape'
+  | 'Vehicles & Picture Cars'
+  | 'Post & DIT';
+
+export type EquipmentStatus = 'Reserved' | 'Checked Out' | 'On Set' | 'Maintenance';
+
+export interface EquipmentItem {
+  id: string;
+  name: string;
+  category: EquipmentCategory;
+  quantity: number;
+  dailyRate: number;
+  shootDays: number;
+  vendor?: string;
+  status: EquipmentStatus;
+  assignedSceneIds: string[];
+  notes?: string;
+}
+
+export interface FinanceSettings {
+  contingencyPercent: number;
+  fringePercent: number;
+  taxCreditPercent: number;
+  overheadFlat: number;
+  targetCap?: number;
+  lastRecalculatedAt?: string;
+}
+
+export interface CollaboratorProfile {
+  id: string;
+  name: string;
+  role: string;
+  email?: string;
+  color: string;
+  isExternal: boolean;
+  addedAt: string;
+}
+
+export type SuggestionKind = 'edit_text' | 'insert_after' | 'delete_element' | 'note';
+export type SuggestionStatus = 'pending' | 'accepted' | 'rejected';
+
+export interface CollaboratorSuggestion {
+  id: string;
+  collaboratorId: string;
+  sceneId?: string;
+  elementId?: string;
+  kind: SuggestionKind;
+  proposedElementType?: ElementType;
+  originalTextSnapshot?: string;
+  proposedText: string;
+  rationale?: string;
+  status: SuggestionStatus;
+  createdAt: string;
+  reviewedAt?: string;
+}
+
 export interface StoryProject {
   id: string;
   title: string;
@@ -641,19 +742,31 @@ export interface StoryProject {
   locations?: ShootLocation[];
   characterBreakdowns?: CharacterBreakdownOverride[];
   scriptFormat?: ScriptFormatMode;
+  documentCategory?: 'film' | 'stage' | 'book' | 'television' | 'production';
+  editorTypography?: EditorTypographySettings;
   projectBible?: ProjectBible;
   characterRelationships?: CharacterRelationshipEdge[];
   characterNodePositions?: Record<string, { x: number; y: number }>;
+  characterEdgePositions?: Record<string, { x: number; y: number }>;
   scheduleBaseline?: ScheduleSceneSnapshot[];
   lastScheduleSyncAt?: string;
   generatedMetadataLog?: NLEGeneratedSidecarEntry[];
   acknowledgedContinuityIds?: string[];
+  customDictionary?: string[];
+  equipmentManifest?: EquipmentItem[];
+  financeSettings?: FinanceSettings;
+  collaborators?: CollaboratorProfile[];
+  collaboratorSuggestions?: CollaboratorSuggestion[];
 }
 
 export type ActiveWorkspace =
   | 'authoring'
+  | 'characters'
+  | 'outline'
   | 'production'
   | 'storyboard'
+  | 'collaboration'
+  | 'teleprompter'
   | 'project_bible'
   | 'rust_engine'
   | 'projects';

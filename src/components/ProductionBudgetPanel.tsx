@@ -14,6 +14,8 @@ import {
 import {
   CastCrewMember,
   CrewDepartment,
+  EquipmentItem,
+  FinanceSettings,
   Scene,
   StripboardStrip,
 } from '../types/story';
@@ -27,6 +29,8 @@ import {
   Layers,
   Users,
   Calendar,
+  RefreshCw,
+  Wrench,
 } from 'lucide-react';
 
 export interface MemberBudgetLine {
@@ -325,6 +329,11 @@ interface ProductionBudgetPanelProps {
   members: CastCrewMember[];
   scenes: Scene[];
   strips: StripboardStrip[];
+  equipmentManifest?: EquipmentItem[];
+  financeSettings?: FinanceSettings;
+  onUpdateFinanceSettings?: (settings: FinanceSettings) => void;
+  onRecalculateFinances?: () => void;
+  onOpenEquipmentManifest?: () => void;
   onEditMember: (member: CastCrewMember) => void;
   onSelectMember: (memberId: string) => void;
   onAddMember: () => void;
@@ -349,6 +358,11 @@ export const ProductionBudgetPanel: React.FC<ProductionBudgetPanelProps> = ({
   members,
   scenes,
   strips,
+  equipmentManifest = [],
+  financeSettings,
+  onUpdateFinanceSettings,
+  onRecalculateFinances,
+  onOpenEquipmentManifest,
   onEditMember,
   onSelectMember,
   onAddMember,
@@ -358,10 +372,44 @@ export const ProductionBudgetPanel: React.FC<ProductionBudgetPanelProps> = ({
   const [dealFilter, setDealFilter] = useState<'all' | 'approved' | 'pending'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'cost_desc' | 'name' | 'department' | 'days_desc'>('cost_desc');
-  const [contingencyPct, setContingencyPct] = useState<number>(10);
+  const [localContingencyPct, setLocalContingencyPct] = useState<number>(
+    financeSettings?.contingencyPercent ?? 10
+  );
+  const [localFringePct, setLocalFringePct] = useState<number>(
+    financeSettings?.fringePercent ?? 18
+  );
+  const [localTaxCreditPct, setLocalTaxCreditPct] = useState<number>(
+    financeSettings?.taxCreditPercent ?? 0
+  );
+  const [localOverheadFlat, setLocalOverheadFlat] = useState<number>(
+    financeSettings?.overheadFlat ?? 0
+  );
+
+  const contingencyPct = financeSettings?.contingencyPercent ?? localContingencyPct;
+  const fringePct = financeSettings?.fringePercent ?? localFringePct;
+  const taxCreditPct = financeSettings?.taxCreditPercent ?? localTaxCreditPct;
+  const overheadFlat = financeSettings?.overheadFlat ?? localOverheadFlat;
 
   const sceneBudgetBaseline = useMemo(() => parseSceneBudgetSum(scenes), [scenes]);
-  const [budgetCapInput, setBudgetCapInput] = useState<string>('');
+  const [budgetCapInput, setBudgetCapInput] = useState<string>(() =>
+    financeSettings?.targetCap ? String(financeSettings.targetCap) : ''
+  );
+
+  const updateFinancePatch = (patch: Partial<FinanceSettings>) => {
+    const next: FinanceSettings = {
+      contingencyPercent: patch.contingencyPercent ?? contingencyPct,
+      fringePercent: patch.fringePercent ?? fringePct,
+      taxCreditPercent: patch.taxCreditPercent ?? taxCreditPct,
+      overheadFlat: patch.overheadFlat ?? overheadFlat,
+      targetCap: patch.targetCap !== undefined ? patch.targetCap : financeSettings?.targetCap,
+      lastRecalculatedAt: financeSettings?.lastRecalculatedAt,
+    };
+    if (patch.contingencyPercent !== undefined) setLocalContingencyPct(patch.contingencyPercent);
+    if (patch.fringePercent !== undefined) setLocalFringePct(patch.fringePercent);
+    if (patch.taxCreditPercent !== undefined) setLocalTaxCreditPct(patch.taxCreditPercent);
+    if (patch.overheadFlat !== undefined) setLocalOverheadFlat(patch.overheadFlat);
+    onUpdateFinanceSettings?.(next);
+  };
 
   const effectiveMembers = useMemo(() => {
     return members.filter((m) => {
@@ -397,15 +445,30 @@ export const ProductionBudgetPanel: React.FC<ProductionBudgetPanelProps> = ({
     });
   }, [budget.lines, searchQuery, sortBy]);
 
-  const contingencyAmount = Math.round((budget.grandTotal * contingencyPct) / 100);
-  const totalWithContingency = budget.grandTotal + contingencyAmount;
+  const equipmentTotal = useMemo(
+    () =>
+      equipmentManifest.reduce(
+        (sum, item) =>
+          sum + item.dailyRate * Math.max(1, item.quantity) * Math.max(1, item.shootDays),
+        0
+      ),
+    [equipmentManifest]
+  );
+
+  const fringeAmount = Math.round((budget.totalLabor * fringePct) / 100);
+  const directProductionSubtotal =
+    budget.grandTotal + equipmentTotal + fringeAmount + Math.max(0, Math.round(overheadFlat));
+  const contingencyAmount = Math.round((directProductionSubtotal * contingencyPct) / 100);
+  const totalWithContingency = directProductionSubtotal + contingencyAmount;
+  const taxCreditRebate = Math.round((totalWithContingency * taxCreditPct) / 100);
+  const netEstimatedCost = Math.max(0, totalWithContingency - taxCreditRebate);
 
   const parsedBudgetCap = useMemo(() => {
     const val = Number(budgetCapInput.replace(/[^0-9.]/g, ''));
     return Number.isFinite(val) && val > 0 ? val : null;
   }, [budgetCapInput]);
 
-  const capVariance = parsedBudgetCap !== null ? parsedBudgetCap - totalWithContingency : null;
+  const capVariance = parsedBudgetCap !== null ? parsedBudgetCap - netEstimatedCost : null;
 
   const castPct =
     budget.grandTotal > 0 ? Math.round((budget.castTotal / budget.grandTotal) * 100) : 0;
@@ -513,22 +576,32 @@ export const ProductionBudgetPanel: React.FC<ProductionBudgetPanelProps> = ({
     URL.revokeObjectURL(url);
   };
 
-  if (members.length === 0) {
+  if (members.length === 0 && equipmentManifest.length === 0) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-10 text-center text-gray-400 space-y-3">
         <DollarSign className="w-10 h-10 text-gray-600" />
         <div>
-          <p className="text-sm font-semibold text-gray-200">No Cast or Crew Pay Rates Logged</p>
+          <p className="text-sm font-semibold text-gray-200">No Cast, Crew, or Equipment Costs Logged</p>
           <p className="text-xs text-gray-500 mt-1 max-w-md">
-            Add cast and crew members with their daily, weekly, hourly, or flat rates and scheduled shooting days to generate a running production budget estimate.
+            Add cast and crew members or equipment packages to generate a live production finance breakdown.
           </p>
         </div>
-        <button
-          onClick={onAddMember}
-          className="px-4 py-2 bg-[#ff7700] hover:bg-[#ff8c1a] text-black font-semibold rounded transition-colors"
-        >
-          Add First Cast / Crew
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onAddMember}
+            className="px-4 py-2 bg-[#ff7700] hover:bg-[#ff8c1a] text-black font-semibold rounded transition-colors"
+          >
+            Add First Cast / Crew
+          </button>
+          {onOpenEquipmentManifest && (
+            <button
+              onClick={onOpenEquipmentManifest}
+              className="px-4 py-2 bg-[#2a2a2a] hover:bg-[#353535] border border-[#444] text-gray-200 font-semibold rounded transition-colors"
+            >
+              Open Equipment Manifest
+            </button>
+          )}
+        </div>
       </div>
     );
   }
@@ -595,7 +668,7 @@ export const ProductionBudgetPanel: React.FC<ProductionBudgetPanelProps> = ({
               {[0, 5, 10, 15].map((pct) => (
                 <button
                   key={pct}
-                  onClick={() => setContingencyPct(pct)}
+                  onClick={() => updateFinancePatch({ contingencyPercent: pct })}
                   className={`px-2 py-0.5 rounded text-[11px] font-mono tabular-nums transition-colors whitespace-nowrap shrink-0 ${
                     contingencyPct === pct
                       ? 'bg-[#2f2f2f] text-amber-400 font-semibold'
@@ -608,35 +681,96 @@ export const ProductionBudgetPanel: React.FC<ProductionBudgetPanelProps> = ({
             </div>
           </div>
 
+          <label className="flex items-center gap-1 text-[11px] text-gray-400 whitespace-nowrap">
+            <span>Fringe %:</span>
+            <input
+              type="number"
+              min={0}
+              max={60}
+              value={fringePct}
+              onChange={(e) =>
+                updateFinancePatch({ fringePercent: Math.max(0, Math.min(60, Number(e.target.value) || 0)) })
+              }
+              className="w-14 bg-[#161616] text-gray-100 font-mono tabular-nums px-1.5 py-1 rounded border border-[#383838] text-[11px] focus:outline-none focus:border-[#ff8000]"
+            />
+          </label>
+
+          <label className="flex items-center gap-1 text-[11px] text-gray-400 whitespace-nowrap">
+            <span>Tax Rebate %:</span>
+            <input
+              type="number"
+              min={0}
+              max={50}
+              value={taxCreditPct}
+              onChange={(e) =>
+                updateFinancePatch({ taxCreditPercent: Math.max(0, Math.min(50, Number(e.target.value) || 0)) })
+              }
+              className="w-14 bg-[#161616] text-emerald-300 font-mono tabular-nums px-1.5 py-1 rounded border border-[#383838] text-[11px] focus:outline-none focus:border-[#ff8000]"
+            />
+          </label>
+
+          <label className="flex items-center gap-1 text-[11px] text-gray-400 whitespace-nowrap">
+            <span>Overhead $:</span>
+            <input
+              type="number"
+              min={0}
+              step={500}
+              value={overheadFlat}
+              onChange={(e) =>
+                updateFinancePatch({ overheadFlat: Math.max(0, Number(e.target.value) || 0) })
+              }
+              className="w-20 bg-[#161616] text-gray-100 font-mono tabular-nums px-1.5 py-1 rounded border border-[#383838] text-[11px] focus:outline-none focus:border-[#ff8000]"
+            />
+          </label>
+
           <div className="flex items-center gap-1.5">
             <label htmlFor="budget-cap-input" className="text-[11px] text-gray-400 whitespace-nowrap">
-              Labor Cap:
+              Cap:
             </label>
             <input
               id="budget-cap-input"
               type="text"
               placeholder={sceneBudgetBaseline > 0 ? `e.g. ${sceneBudgetBaseline}` : 'Optional ($)'}
               value={budgetCapInput}
-              onChange={(e) => setBudgetCapInput(e.target.value)}
-              className="w-28 bg-[#161616] text-gray-100 font-mono tabular-nums px-2 py-1 rounded border border-[#383838] text-[11px] focus:outline-none focus:border-[#ff8000]"
+              onChange={(e) => {
+                setBudgetCapInput(e.target.value);
+                const parsed = Number(e.target.value.replace(/[^0-9.]/g, ''));
+                updateFinancePatch({ targetCap: Number.isFinite(parsed) && parsed > 0 ? parsed : undefined });
+              }}
+              className="w-24 bg-[#161616] text-gray-100 font-mono tabular-nums px-2 py-1 rounded border border-[#383838] text-[11px] focus:outline-none focus:border-[#ff8000]"
             />
             {sceneBudgetBaseline > 0 && budgetCapInput !== String(sceneBudgetBaseline) && (
               <button
-                onClick={() => setBudgetCapInput(String(sceneBudgetBaseline))}
+                onClick={() => {
+                  setBudgetCapInput(String(sceneBudgetBaseline));
+                  updateFinancePatch({ targetCap: sceneBudgetBaseline });
+                }}
                 className="text-[11px] text-amber-400 hover:text-amber-300 underline-offset-2 hover:underline whitespace-nowrap shrink-0"
                 title="Set cap to sum of scene budgets"
               >
-                Use Scene Cap ({formatCurrency(sceneBudgetBaseline)})
+                Scene Cap ({formatCurrency(sceneBudgetBaseline)})
               </button>
             )}
           </div>
+
+          {onRecalculateFinances && (
+            <button
+              type="button"
+              onClick={onRecalculateFinances}
+              className="flex items-center gap-1.5 px-3 py-1 bg-[#ff7700] hover:bg-[#ff8c1a] text-black rounded font-bold text-[11px] transition-colors whitespace-nowrap shrink-0"
+              title="Recalculate scene budgets, eighths, payroll, equipment rentals, and net rebates"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Recalculate Finances</span>
+            </button>
+          )}
 
           <button
             onClick={handleExportCsv}
             className="flex items-center gap-1.5 px-3 py-1 bg-[#2a2a2a] hover:bg-[#353535] text-gray-200 rounded border border-[#444] text-[11px] font-medium transition-colors whitespace-nowrap shrink-0"
           >
             <Download className="w-3.5 h-3.5 text-amber-400" />
-            <span>Download CSV</span>
+            <span>CSV</span>
           </button>
         </div>
       </div>
@@ -644,56 +778,67 @@ export const ProductionBudgetPanel: React.FC<ProductionBudgetPanelProps> = ({
       {/* Budget Top-Sheet KPI Strip (Clean hairline-divided columns, tabular figures) */}
       <div className="bg-[#222222] border border-[#353535] rounded px-4 py-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-0 lg:divide-x lg:divide-[#323232]">
         <div className="lg:pr-4">
-          <div className="text-[11px] text-gray-400">Running Scheduled Payroll</div>
+          <div className="text-[11px] text-gray-400">Scheduled Payroll &amp; Fringe</div>
           <div className="text-xl font-bold font-mono tabular-nums text-amber-400 mt-0.5">
-            {formatCurrency(budget.grandTotal)}
+            {formatCurrency(budget.grandTotal + fringeAmount)}
           </div>
           <div className="text-[11px] text-gray-400 font-mono tabular-nums mt-0.5">
-            {formatCurrency(budget.totalLabor)} labor · {formatCurrency(budget.totalKit)} kit ({budget.totalPersonDays} person-days)
+            {formatCurrency(budget.totalLabor)} labor · {formatCurrency(fringeAmount)} fringe · {formatCurrency(budget.totalKit)} kit
           </div>
         </div>
 
         <div className="lg:px-4">
-          <div className="text-[11px] text-gray-400">Cast vs. Crew Allocation</div>
+          <div className="text-[11px] text-gray-400 flex items-center justify-between">
+            <span>Equipment &amp; Overhead</span>
+            {onOpenEquipmentManifest && (
+              <button
+                type="button"
+                onClick={onOpenEquipmentManifest}
+                className="text-[10px] text-cyan-300 hover:underline flex items-center gap-1"
+              >
+                <Wrench className="w-3 h-3" />
+                <span>Manifest</span>
+              </button>
+            )}
+          </div>
+          <div className="text-xl font-bold font-mono tabular-nums text-cyan-300 mt-0.5">
+            {formatCurrency(equipmentTotal + Math.max(0, Math.round(overheadFlat)))}
+          </div>
+          <div className="text-[11px] text-gray-400 tabular-nums mt-0.5">
+            {equipmentManifest.length} gear pkg ({formatCurrency(equipmentTotal)}) · {formatCurrency(overheadFlat)} overhead
+          </div>
+        </div>
+
+        <div className="lg:px-4">
+          <div className="text-[11px] text-gray-400">Cast / Crew &amp; Approvals</div>
           <div className="flex items-baseline gap-2 mt-0.5 font-mono tabular-nums">
             <span className="text-base font-semibold text-gray-100">
               {formatCurrency(budget.castTotal)}
             </span>
             <span className="text-gray-500">/</span>
-            <span className="text-base font-semibold text-cyan-300">
+            <span className="text-base font-semibold text-emerald-400">
               {formatCurrency(budget.crewTotal)}
             </span>
-          </div>
-          <div className="text-[11px] text-gray-400 tabular-nums mt-0.5">
-            {castPct}% Cast · {crewPct}% Crew · Avg {formatCurrency(budget.avgDailyBurn)}/shoot day
-          </div>
-        </div>
-
-        <div className="lg:px-4">
-          <div className="text-[11px] text-gray-400">Approval Exposure</div>
-          <div className="flex items-baseline gap-2 mt-0.5 font-mono tabular-nums">
-            <span className="text-base font-semibold text-emerald-400">
-              {formatCurrency(budget.approvedTotal)}
-            </span>
-            <span className="text-[11px] font-sans text-gray-400">approved</span>
           </div>
           <div className="text-[11px] mt-0.5 font-mono tabular-nums">
             {budget.pendingTotal > 0 ? (
               <span className="text-amber-400">
-                {formatCurrency(budget.pendingTotal)} pending deal memo / hold
+                {castPct}/{crewPct}% split · {formatCurrency(budget.pendingTotal)} unapproved
               </span>
             ) : (
-              <span className="text-gray-400 font-sans">100% of unit deals approved</span>
+              <span className="text-gray-400 font-sans">
+                {castPct}/{crewPct}% split · Avg {formatCurrency(budget.avgDailyBurn)}/day
+              </span>
             )}
           </div>
         </div>
 
         <div className="lg:pl-4">
           <div className="text-[11px] text-gray-400">
-            Total Est. ({contingencyPct}% Contingency)
+            Net Est. ({contingencyPct}% Cont.{taxCreditPct > 0 ? ` - ${taxCreditPct}% Tax` : ''})
           </div>
           <div className="text-xl font-bold font-mono tabular-nums text-gray-100 mt-0.5">
-            {formatCurrency(totalWithContingency)}
+            {formatCurrency(netEstimatedCost)}
           </div>
           <div className="text-[11px] mt-0.5 font-mono tabular-nums">
             {capVariance !== null ? (
@@ -704,7 +849,8 @@ export const ProductionBudgetPanel: React.FC<ProductionBudgetPanelProps> = ({
               </span>
             ) : (
               <span className="text-gray-400">
-                +{formatCurrency(contingencyAmount)} contingency reserve
+                Gross {formatCurrency(totalWithContingency)}
+                {taxCreditRebate > 0 ? ` (-${formatCurrency(taxCreditRebate)} rebate)` : ''}
               </span>
             )}
           </div>

@@ -17,21 +17,40 @@ import {
   ScriptFormatMode,
   ProjectBible,
   NLEGeneratedSidecarEntry,
-  CharacterRelationshipEdge
+  CharacterRelationshipEdge,
+  ElementFormatting,
+  EditorTypographySettings,
+  CollaboratorProfile,
+  CollaboratorSuggestion,
+  EquipmentItem,
+  FinanceSettings,
+  StoryCharacter,
 } from './types/story';
+import {
+  DEFAULT_EDITOR_TYPOGRAPHY,
+  getEffectiveElementFormatting,
+} from './utils/screenplayFormatting';
+import {
+  DocumentTemplateKind,
+  cloneProductionAssetsFromProject,
+  createNewProductionProject,
+  createProjectFromDocumentTemplate,
+  generateNewProductionScheduleStrips,
+} from './utils/projectTemplates';
 import { SAMPLE_PROJECTS } from './data/sampleScripts';
 import { TopHeader } from './components/TopHeader';
 import { MenuBar } from './components/MenuBar';
 import { FormattingToolbar } from './components/FormattingToolbar';
 import { OutlineColumn } from './components/OutlineColumn';
 import { ScreenplayEditor } from './components/ScreenplayEditor';
-import { StripboardView } from './components/StripboardView';
-import { CastCrewDirectory } from './components/CastCrewDirectory';
-import { LocationMapView } from './components/LocationMapView';
-import { InspectorColumn } from './components/InspectorColumn';
+import { InspectorColumn, InspectorTabId } from './components/InspectorColumn';
 import { StoryboardWorkspace } from './components/StoryboardWorkspace';
 import { ProjectContainerView } from './components/ProjectContainerView';
-import { RustDesktopHub } from './components/RustDesktopHub';
+import { CharactersWorkspace } from './components/CharactersWorkspace';
+import { OutlineWorkspace } from './components/OutlineWorkspace';
+import { ProductionWorkspace, ProductionHubTab } from './components/ProductionWorkspace';
+import { CollaborationWorkspace } from './components/CollaborationWorkspace';
+import { PreferencesModal } from './components/PreferencesModal';
 import { ProjectsBrowser } from './components/ProjectsBrowser';
 import { ExportModal } from './components/ExportModal';
 import { ReportsModal } from './components/ReportsModal';
@@ -42,6 +61,7 @@ import { SceneContinuityModal } from './components/SceneContinuityModal';
 import { HelpGuideModal, HelpSectionCategory } from './components/HelpGuideModal';
 import { QuickNotesSidebar } from './components/QuickNotesSidebar';
 import { parseFountain } from './utils/screenplayParser';
+import { analyzeScriptProofreading } from './utils/scriptProofreading';
 import { generateRustDesktopZip } from './utils/rustDesktopGenerator';
 import {
   computeRevisionImpact,
@@ -50,8 +70,22 @@ import {
 } from './utils/liveScheduleSync';
 import { computeRevisionPassCounts } from './utils/revisionPass';
 import { analyzeSceneContinuity } from './utils/sceneContinuityCheck';
+import {
+  UserDocumentTemplate,
+  UserTemplateCategory,
+  deleteUserTemplate,
+  getSanitizedSccrftFileName,
+  hasBoundSccrftHandle,
+  instantiateProjectFromUserTemplate,
+  loadUserTemplates,
+  normalizeSccrftFileName,
+  parseOpenedDocumentFile,
+  saveProjectAsUserTemplate,
+  saveSccrftLocally,
+} from './utils/sccrftFileFormat';
 import { ExportFormatType } from './utils/exportPreviewFormatter';
-import { Upload, X, Clock, Save, CheckCircle } from 'lucide-react';
+import { printScreenplayDocument } from './utils/printHelper';
+import { Upload, X, Clock, Save, CheckCircle, Download, BookmarkPlus } from 'lucide-react';
 
 const STORAGE_KEY_PROJECTS = 'adobe_story_projects_v1';
 const STORAGE_KEY_CURRENT_ID = 'adobe_story_current_project_id';
@@ -112,26 +146,34 @@ export default function App() {
   });
 
   const [isSaving, setIsSaving] = useState(false);
-  const [activeWorkspace, setActiveWorkspace] = useState<ActiveWorkspace>('authoring');
-  const [productionSubView, setProductionSubView] = useState<'stripboard' | 'cast_crew' | 'location_map'>('stripboard');
-  const [directoryInitialView, setDirectoryInitialView] = useState<
-    'roster' | 'gallery' | 'character_breakdown' | 'connections' | 'timeline' | 'budget' | 'call_sheet'
-  >('roster');
+  const [activeWorkspace, setActiveWorkspace] = useState<ActiveWorkspace>('projects');
   const [callSheetDayNumber, setCallSheetDayNumber] = useState<number | null>(null);
   const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null);
   const [focusedElementId, setFocusedElementId] = useState<string | null>(null);
   const [currentElementType, setCurrentElementType] = useState<ElementType>('SCENE_HEADING');
+  const [elementsPopupTriggerNonce, setElementsPopupTriggerNonce] = useState<number>(0);
   const [zoomLevel, setZoomLevel] = useState<number>(100);
 
   // Modals & Popups
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [initialExportFormat, setInitialExportFormat] = useState<ExportFormatType>('pdf');
+  const [autoPrintOnExport, setAutoPrintOnExport] = useState(false);
   const [isReportsOpen, setIsReportsOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
+  const [isSaveAsModalOpen, setIsSaveAsModalOpen] = useState(false);
+  const [saveAsFileName, setSaveAsFileName] = useState('');
+  const [isSaveTemplateModalOpen, setIsSaveTemplateModalOpen] = useState(false);
+  const [templateNameInput, setTemplateNameInput] = useState('');
+  const [templateCategoryInput, setTemplateCategoryInput] = useState<UserTemplateCategory>('film');
+  const [templateDescInput, setTemplateDescInput] = useState('');
+  const [userTemplates, setUserTemplates] = useState<UserDocumentTemplate[]>(() =>
+    loadUserTemplates()
+  );
   const [isNLEPipelineOpen, setIsNLEPipelineOpen] = useState(false);
   const [isRevisionImpactOpen, setIsRevisionImpactOpen] = useState(false);
   const [isTeleprompterOpen, setIsTeleprompterOpen] = useState(false);
   const [isContinuityModalOpen, setIsContinuityModalOpen] = useState(false);
+  const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
   const [isHelpGuideOpen, setIsHelpGuideOpen] = useState(false);
   const [helpInitialCategory, setHelpInitialCategory] = useState<HelpSectionCategory>('all');
   const [helpInitialToolId, setHelpInitialToolId] = useState<string | undefined>(undefined);
@@ -139,13 +181,23 @@ export default function App() {
   const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
   const [isQuickNotesOpen, setIsQuickNotesOpen] = useState(false);
   const [inspectorRequestedTab, setInspectorRequestedTab] = useState<{
-    tab: 'comments' | 'tags' | 'properties' | 'shots' | 'history' | 'continuity';
+    tab: InspectorTabId;
+    subMode?: 'spelling' | 'grammar';
     nonce: number;
   } | null>(null);
+  const [charactersInitialSubView, setCharactersInitialSubView] = useState<
+    'details' | 'bios' | 'connections'
+  >('details');
+  const [productionRequestedTab, setProductionRequestedTab] = useState<{
+    tab: ProductionHubTab;
+    nonce: number;
+  } | null>(null);
+  const [selectedSuggestionId, setSelectedSuggestionId] = useState<string | null>(null);
   const [isRevisionPassMode, setIsRevisionPassMode] = useState(false);
   const [importText, setImportText] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [gmpQuotaExceeded, setGmpQuotaExceeded] = useState(false);
+  const deviceFileInputRef = React.useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const handleQuotaExceeded = () => {
@@ -165,6 +217,21 @@ export default function App() {
 
   const currentProject = projects.find((p) => p.id === currentProjectId) || projects[0];
 
+  const activeTargetElement = React.useMemo(() => {
+    if (focusedElementId) {
+      const found = currentProject.elements.find((el) => el.id === focusedElementId);
+      if (found) return found;
+    }
+    return currentProject.elements[0];
+  }, [currentProject.elements, focusedElementId]);
+
+  const projectTypography = currentProject.editorTypography || DEFAULT_EDITOR_TYPOGRAPHY;
+
+  const effectiveFormatting = React.useMemo(
+    () => getEffectiveElementFormatting(activeTargetElement, projectTypography),
+    [activeTargetElement, projectTypography]
+  );
+
   const revisionImpactReport = React.useMemo(
     () => computeRevisionImpact(currentProject),
     [currentProject]
@@ -178,6 +245,31 @@ export default function App() {
   const continuityReport = React.useMemo(
     () => analyzeSceneContinuity(currentProject),
     [currentProject]
+  );
+
+  const proofreadReport = React.useMemo(
+    () =>
+      analyzeScriptProofreading(
+        currentProject.elements,
+        currentProject.scenes,
+        'project',
+        selectedSceneId,
+        currentProject.customDictionary || []
+      ),
+    [
+      currentProject.elements,
+      currentProject.scenes,
+      selectedSceneId,
+      currentProject.customDictionary,
+    ]
+  );
+
+  const pendingCollaborationCount = React.useMemo(
+    () =>
+      (currentProject.collaboratorSuggestions || []).filter(
+        (s) => s.status === 'pending'
+      ).length,
+    [currentProject.collaboratorSuggestions]
   );
 
   const showToast = (msg: string) => {
@@ -218,12 +310,51 @@ export default function App() {
     return () => clearInterval(interval);
   }, [saveProjectState]);
 
-  // Global Ctrl+S / Cmd+S shortcut to manually trigger save
+  // Global Ctrl+S / Ctrl+O / Ctrl+P shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const key = e.key.toLowerCase();
+      if (key === 's') {
         e.preventDefault();
         saveProjectState(false);
+        const curProj =
+          stateRef.current.projects.find((p) => p.id === stateRef.current.currentProjectId) ||
+          stateRef.current.projects[0];
+        if (curProj && hasBoundSccrftHandle(curProj.id)) {
+          void saveSccrftLocally(curProj, { saveAs: false }).then((res) => {
+            if (res.status === 'saved') {
+              showToast(`Saved ${res.fileName}`);
+            }
+          });
+        }
+      } else if (key === 'o') {
+        e.preventDefault();
+        if (deviceFileInputRef.current) {
+          deviceFileInputRef.current.value = '';
+          deviceFileInputRef.current.click();
+        }
+      } else if (key === 'p') {
+        e.preventDefault();
+        const curProj =
+          stateRef.current.projects.find((p) => p.id === stateRef.current.currentProjectId) ||
+          stateRef.current.projects[0];
+        if (curProj) {
+          const res = printScreenplayDocument(
+            curProj,
+            { includeTitlePage: true, includeSceneNumbers: true, includePageNumbers: true },
+            true
+          );
+          if (res.printed) {
+            showToast('Print dialog opened for screenplay');
+          } else {
+            showToast(
+              `Print blocked by preview frame — downloaded ${
+                res.fallbackPdfFilename || 'screenplay.pdf'
+              }`
+            );
+          }
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -340,6 +471,50 @@ export default function App() {
       elements: proj.elements.map((el) =>
         el.id === id ? { ...el, character: cleaned || undefined, lastEditedAt: editedIso } : el
       ),
+    }));
+  };
+
+  const handleUpdateElementFormatting = (id: string, patch: Partial<ElementFormatting>) => {
+    const editedIso = new Date().toISOString();
+    updateCurrentProject((proj) => ({
+      ...proj,
+      elements: proj.elements.map((el) =>
+        el.id === id
+          ? {
+              ...el,
+              lastEditedAt: editedIso,
+              formatting: { ...(el.formatting || {}), ...patch },
+            }
+          : el
+      ),
+    }));
+  };
+
+  const handleUpdateProjectTypography = (patch: Partial<EditorTypographySettings>) => {
+    const elementTypographyKeys: Array<'fontFamily' | 'fontSizePt' | 'lineSpacing'> = [
+      'fontFamily',
+      'fontSizePt',
+      'lineSpacing',
+    ];
+    const keysToClear = elementTypographyKeys.filter((k) => patch[k] !== undefined);
+    updateCurrentProject((proj) => ({
+      ...proj,
+      editorTypography: {
+        ...(proj.editorTypography || DEFAULT_EDITOR_TYPOGRAPHY),
+        ...patch,
+      },
+      elements: proj.elements.map((el) => {
+        if (!el.formatting) return el;
+        const cleaned = { ...el.formatting };
+        let changed = false;
+        keysToClear.forEach((k) => {
+          if (cleaned[k] !== undefined) {
+            delete cleaned[k];
+            changed = true;
+          }
+        });
+        return changed ? { ...el, formatting: cleaned } : el;
+      }),
     }));
   };
 
@@ -723,6 +898,345 @@ export default function App() {
     updateCurrentProject((proj) => ({
       ...proj,
       characterNodePositions,
+    }));
+  };
+
+  const handleUpdateCharacterEdgePositions = (
+    characterEdgePositions: Record<string, { x: number; y: number }>
+  ) => {
+    updateCurrentProject((proj) => ({
+      ...proj,
+      characterEdgePositions,
+    }));
+  };
+
+  const handleUpdateCharacters = (characters: StoryCharacter[]) => {
+    updateCurrentProject((proj) => ({
+      ...proj,
+      characters,
+    }));
+  };
+
+  const handleApplyElementTextFix = (
+    elementId: string,
+    newText: string,
+    description: string
+  ) => {
+    const editedIso = new Date().toISOString();
+    updateCurrentProject((proj) => {
+      const target = proj.elements.find((el) => el.id === elementId);
+      const scene = proj.scenes.find((s) => s.id === target?.sceneId) || proj.scenes[0];
+      const updatedElements = proj.elements.map((el) =>
+        el.id === elementId ? { ...el, text: newText, lastEditedAt: editedIso } : el
+      );
+      const rev: ScreenplayRevision = {
+        id: `rev-fix-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+        timestamp: editedIso,
+        dateFormatted: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        author: proj.author || 'Jeffrey (Online)',
+        changeType: 'text_edit',
+        elementType: target?.type || 'ACTION',
+        sceneId: target?.sceneId || scene?.id,
+        sceneNumber: scene?.sceneNumber,
+        sceneHeading: scene?.heading,
+        elementId,
+        previousText: target?.text || '',
+        newText,
+        description,
+        draftLabel: proj.activeDraftName,
+        draftColor: proj.activeDraftColor,
+      };
+      return {
+        ...proj,
+        elements: updatedElements,
+        revisions: [rev, ...(proj.revisions || [])],
+      };
+    });
+    showToast(description);
+  };
+
+  const handleAddToDictionary = (word: string) => {
+    const clean = word.trim();
+    if (!clean) return;
+    updateCurrentProject((proj) => {
+      const existing = new Set(proj.customDictionary || []);
+      existing.add(clean);
+      return {
+        ...proj,
+        customDictionary: Array.from(existing),
+      };
+    });
+    showToast(`Added "${clean}" to project dictionary`);
+  };
+
+  const handleJumpToElement = (sceneId: string | undefined, elementId: string) => {
+    if (sceneId) setSelectedSceneId(sceneId);
+    setFocusedElementId(elementId);
+    const matched = currentProject.elements.find((el) => el.id === elementId);
+    if (matched) setCurrentElementType(matched.type);
+    setActiveWorkspace('authoring');
+  };
+
+  const handleReorderScene = (sceneId: string, direction: 'earlier' | 'later') => {
+    updateCurrentProject((proj) => {
+      const idx = proj.scenes.findIndex((s) => s.id === sceneId);
+      if (idx < 0) return proj;
+      const targetIdx = direction === 'earlier' ? idx - 1 : idx + 1;
+      if (targetIdx < 0 || targetIdx >= proj.scenes.length) return proj;
+
+      const reordered = [...proj.scenes];
+      const [moved] = reordered.splice(idx, 1);
+      reordered.splice(targetIdx, 0, moved);
+
+      const renumbered = reordered.map((sc, i) => ({
+        ...sc,
+        sceneNumber: i + 1,
+      }));
+
+      // Reorder elements grouped by scene order while preserving unassigned elements first
+      const ungrouped = proj.elements.filter((el) => !el.sceneId);
+      const groupedElements = renumbered.flatMap((sc) =>
+        proj.elements.filter((el) => el.sceneId === sc.id)
+      );
+
+      const stripBySceneId = new Map(
+        proj.strips.filter((st) => st.sceneId).map((st) => [st.sceneId!, st])
+      );
+      const updatedStrips = proj.strips.map((st) => {
+        if (!st.sceneId) return st;
+        const matchedScene = renumbered.find((s) => s.id === st.sceneId);
+        return matchedScene
+          ? { ...st, sceneNumber: matchedScene.sceneNumber }
+          : st;
+      });
+      void stripBySceneId;
+
+      return {
+        ...proj,
+        scenes: renumbered,
+        elements: [...ungrouped, ...groupedElements],
+        strips: updatedStrips,
+      };
+    });
+    showToast(`Moved scene ${direction}`);
+  };
+
+  const handleAddNewScene = () => {
+    const nextNum = currentProject.scenes.length + 1;
+    const newSceneId = `scene-${Date.now()}`;
+    const newHeadingText = `INT. NEW LOCATION ${nextNum} - DAY`;
+    const newScene: Scene = {
+      id: newSceneId,
+      sceneNumber: nextNum,
+      heading: newHeadingText,
+      setting: `NEW LOCATION ${nextNum}`,
+      location: 'Stage A / Set',
+      intExt: 'INT',
+      dayNight: 'DAY',
+      timecode: '00:00:00',
+      pages: '2/8',
+      eighths: 2,
+      durationSec: 20,
+      storyDay: 1,
+      timeOfDay: '09:00',
+      synopsis: 'Describe the dramatic objective and beat of this scene.',
+      notes: '',
+      budget: '$0',
+      act: currentProject.scenes[currentProject.scenes.length - 1]?.act || 1,
+      characters: [],
+      status: 'Outline',
+    };
+    const headingEl: ScreenplayElement = {
+      id: `el-sc-${Date.now()}-1`,
+      type: 'SCENE_HEADING',
+      text: newHeadingText,
+      sceneId: newSceneId,
+      lastEditedAt: new Date().toISOString(),
+    };
+    const actionEl: ScreenplayElement = {
+      id: `el-sc-${Date.now()}-2`,
+      type: 'ACTION',
+      text: 'Action begins here.',
+      sceneId: newSceneId,
+      lastEditedAt: new Date().toISOString(),
+    };
+    const newStrip: StripboardStrip = {
+      id: `strip-${newSceneId}`,
+      type: 'scene',
+      sceneId: newSceneId,
+      sceneNumber: nextNum,
+      intExt: 'INT',
+      dayNight: 'DAY',
+      set: `NEW LOCATION ${nextNum}`,
+      runningTime: '00:00:00',
+      pages: '2/8',
+      eighths: 2,
+      storyDay: 1,
+      scheduledDuration: '00:30',
+      characters: [],
+      timeOfDay: '09:00',
+    };
+
+    updateCurrentProject((proj) => ({
+      ...proj,
+      scenes: [...proj.scenes, newScene],
+      elements: [...proj.elements, headingEl, actionEl],
+      strips: [...proj.strips, newStrip],
+    }));
+    setSelectedSceneId(newSceneId);
+    setFocusedElementId(actionEl.id);
+    showToast(`Added Scene ${nextNum}`);
+  };
+
+  const handleUpdateEquipmentManifest = (equipmentManifest: EquipmentItem[]) => {
+    updateCurrentProject((proj) => ({
+      ...proj,
+      equipmentManifest,
+    }));
+  };
+
+  const handleUpdateFinanceSettings = (financeSettings: FinanceSettings) => {
+    updateCurrentProject((proj) => ({
+      ...proj,
+      financeSettings,
+    }));
+  };
+
+  const handleRecalculateFinances = () => {
+    handleRecalculate();
+    const nowIso = new Date().toISOString();
+    updateCurrentProject((proj) => ({
+      ...proj,
+      financeSettings: {
+        contingencyPercent: proj.financeSettings?.contingencyPercent ?? 10,
+        fringePercent: proj.financeSettings?.fringePercent ?? 18,
+        taxCreditPercent: proj.financeSettings?.taxCreditPercent ?? 0,
+        overheadFlat: proj.financeSettings?.overheadFlat ?? 0,
+        targetCap: proj.financeSettings?.targetCap,
+        lastRecalculatedAt: nowIso,
+      },
+    }));
+    showToast('Recalculated production finances, eighths, payroll & equipment totals');
+  };
+
+  const handleUpdateCollaborators = (collaborators: CollaboratorProfile[]) => {
+    updateCurrentProject((proj) => ({
+      ...proj,
+      collaborators,
+    }));
+  };
+
+  const handleAddCollaboratorSuggestion = (
+    payload: Omit<CollaboratorSuggestion, 'id' | 'createdAt' | 'status'>
+  ) => {
+    const newSuggestion: CollaboratorSuggestion = {
+      ...payload,
+      id: `sug-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+      createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      status: 'pending',
+    };
+    updateCurrentProject((proj) => ({
+      ...proj,
+      collaboratorSuggestions: [newSuggestion, ...(proj.collaboratorSuggestions || [])],
+    }));
+    setSelectedSuggestionId(newSuggestion.id);
+    showToast('Added non-destructive color-outlined proposal');
+  };
+
+  const handleAcceptCollaboratorSuggestion = (suggestionId: string) => {
+    const target = (currentProject.collaboratorSuggestions || []).find(
+      (s) => s.id === suggestionId
+    );
+    if (!target) return;
+
+    const editedIso = new Date().toISOString();
+    updateCurrentProject((proj) => {
+      let nextElements = [...proj.elements];
+      if (target.kind === 'edit_text' && target.elementId) {
+        nextElements = nextElements.map((el) =>
+          el.id === target.elementId
+            ? { ...el, text: target.proposedText, lastEditedAt: editedIso }
+            : el
+        );
+      } else if (target.kind === 'insert_after') {
+        const idx = target.elementId
+          ? nextElements.findIndex((el) => el.id === target.elementId)
+          : nextElements.length - 1;
+        const inserted: ScreenplayElement = {
+          id: `el-collab-${Date.now()}`,
+          type: target.proposedElementType || 'ACTION',
+          text: target.proposedText,
+          sceneId: target.sceneId || nextElements[Math.max(0, idx)]?.sceneId,
+          lastEditedAt: editedIso,
+        };
+        nextElements.splice(idx >= 0 ? idx + 1 : nextElements.length, 0, inserted);
+      } else if (target.kind === 'delete_element' && target.elementId) {
+        nextElements = nextElements.filter((el) => el.id !== target.elementId);
+      }
+
+      const collab = (proj.collaborators || []).find((c) => c.id === target.collaboratorId);
+      const rev: ScreenplayRevision = {
+        id: `rev-collab-${Date.now()}`,
+        timestamp: editedIso,
+        dateFormatted: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        author: collab ? `${collab.name} (Accepted)` : 'Collaborator',
+        changeType:
+          target.kind === 'insert_after'
+            ? 'element_added'
+            : target.kind === 'delete_element'
+            ? 'element_deleted'
+            : 'text_edit',
+        elementType: target.proposedElementType,
+        sceneId: target.sceneId,
+        elementId: target.elementId,
+        previousText: target.originalTextSnapshot,
+        newText: target.proposedText,
+        description: `Accepted collaboration proposal (${target.kind.replace('_', ' ')})`,
+        draftLabel: proj.activeDraftName,
+        draftColor: proj.activeDraftColor,
+      };
+
+      return {
+        ...proj,
+        elements: nextElements,
+        revisions: target.kind === 'note' ? proj.revisions || [] : [rev, ...(proj.revisions || [])],
+        collaboratorSuggestions: (proj.collaboratorSuggestions || []).map((s) =>
+          s.id === suggestionId ? { ...s, status: 'accepted' } : s
+        ),
+      };
+    });
+    showToast(
+      target.kind === 'note'
+        ? 'Collaborator note marked resolved'
+        : 'Accepted & applied collaborator suggestion to master script'
+    );
+  };
+
+  const handleRejectCollaboratorSuggestion = (suggestionId: string) => {
+    updateCurrentProject((proj) => ({
+      ...proj,
+      collaboratorSuggestions: (proj.collaboratorSuggestions || []).map((s) =>
+        s.id === suggestionId ? { ...s, status: 'rejected' } : s
+      ),
+    }));
+    showToast('Proposal dismissed — master script unchanged');
+  };
+
+  const handleReopenCollaboratorSuggestion = (suggestionId: string) => {
+    updateCurrentProject((proj) => ({
+      ...proj,
+      collaboratorSuggestions: (proj.collaboratorSuggestions || []).map((s) =>
+        s.id === suggestionId ? { ...s, status: 'pending' } : s
+      ),
+    }));
+  };
+
+  const handleDeleteCollaboratorSuggestion = (suggestionId: string) => {
+    updateCurrentProject((proj) => ({
+      ...proj,
+      collaboratorSuggestions: (proj.collaboratorSuggestions || []).filter(
+        (s) => s.id !== suggestionId
+      ),
     }));
   };
 
@@ -1159,86 +1673,267 @@ export default function App() {
         console.error(e);
       }
     } else {
+      setAutoPrintOnExport(false);
       setInitialExportFormat(format);
       setIsExportOpen(true);
     }
   };
 
-  const handleCreateNewProject = () => {
-    const newProj: StoryProject = {
-      id: `proj-${Date.now()}`,
-      title: 'Untitled Screenplay',
-      author: 'Jeffrey (Online)',
-      lastModified: 'Just now',
-      scenes: [
-        {
-          id: 'sc-new-1',
-          sceneNumber: 1,
-          heading: 'INT. PRODUCTION OFFICE - DAY',
-          setting: 'PRODUCTION OFFICE',
-          intExt: 'INT',
-          dayNight: 'DAY',
-          timecode: '00:00:00',
-          durationSec: 60,
-          pages: '1',
-          eighths: 8,
-          characters: ['WRITER'],
-          synopsis: 'The beginning of a new script.',
-          notes: '',
-          budget: '$5,000',
-          location: 'Main Studio',
-          act: 1,
-          storyDay: 1,
-          timeOfDay: '09:00',
-        },
-      ],
-      elements: [
-        { id: 'el-n1', type: 'SCENE_HEADING', text: 'INT. PRODUCTION OFFICE - DAY', sceneId: 'sc-new-1' },
-        { id: 'el-n2', type: 'ACTION', text: 'Bright morning sun streams through blinds. A single monitor hums with an empty Courier page.', sceneId: 'sc-new-1' },
-        { id: 'el-n3', type: 'CHARACTER', text: 'WRITER', sceneId: 'sc-new-1' },
-        { id: 'el-n4', type: 'DIALOGUE', text: 'Where every story begins.', sceneId: 'sc-new-1' },
-      ],
-      tags: [],
-      comments: [],
-      strips: [
-        {
-          id: 'b-new-1',
-          type: 'day_break',
-          bannerTitle: 'START OF DAY 1',
-          bannerDate: 'Monday, 10 Nov 2026',
-          bannerTotalPages: '1 PAGE',
-          bannerFrom: '09:00',
-          bannerTo: '18:00',
-        },
-        {
-          id: 'st-new-1',
-          type: 'scene',
-          sceneId: 'sc-new-1',
-          sceneNumber: 1,
-          intExt: 'INT',
-          dayNight: 'DAY',
-          set: 'PRODUCTION OFFICE',
-          runningTime: '00:01:00',
-          pages: '1',
-          eighths: 8,
-          storyDay: 1,
-          scheduledDuration: '02:00',
-          characters: ['WRITER'],
-          timeOfDay: '09:00',
-          colorClass: 'day-int',
-        },
-      ],
-      characters: [
-        { name: 'WRITER', color: '#ff9f43', scenesCount: 1, speakingLines: 1 },
-      ],
-      storyboards: [],
-    };
+  // File menu & local .sccrft handlers
+  const handleTriggerOpenFromDevice = () => {
+    if (deviceFileInputRef.current) {
+      deviceFileInputRef.current.value = '';
+      deviceFileInputRef.current.click();
+    }
+  };
 
-    setProjects([newProj, ...projects]);
+  const handleDeviceFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const content = await file.text();
+      const openedProject = parseOpenedDocumentFile(file.name, content);
+      setProjects((prev) => {
+        const existsIdx = prev.findIndex((p) => p.id === openedProject.id);
+        if (existsIdx >= 0) {
+          return prev.map((p) => (p.id === openedProject.id ? openedProject : p));
+        }
+        return [openedProject, ...prev];
+      });
+      setCurrentProjectId(openedProject.id);
+      setSelectedSceneId(openedProject.scenes[0]?.id || null);
+      setFocusedElementId(openedProject.elements[0]?.id || null);
+      setActiveWorkspace('authoring');
+      showToast(`Opened "${openedProject.title}" (${file.name})`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Could not open selected file.';
+      showToast(msg);
+    }
+  };
+
+  const handleSaveSccrft = async () => {
+    saveProjectState(false);
+    const res = await saveSccrftLocally(currentProject, { saveAs: false });
+    if (res.status === 'saved') {
+      showToast(`Saved local file ${res.fileName}`);
+    }
+  };
+
+  const handleSaveAsSccrft = async () => {
+    const res = await saveSccrftLocally(currentProject, { saveAs: true });
+    if (res.status === 'saved') {
+      saveProjectState(true);
+      showToast(`Saved as ${res.fileName}`);
+    } else if (res.status === 'needs_save_as_dialog') {
+      setSaveAsFileName(res.suggestedFileName);
+      setIsSaveAsModalOpen(true);
+    }
+  };
+
+  const handleConfirmSaveAsModal = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const finalName = normalizeSccrftFileName(
+      saveAsFileName || getSanitizedSccrftFileName(currentProject.title)
+    );
+    const res = await saveSccrftLocally(currentProject, { customFileName: finalName });
+    setIsSaveAsModalOpen(false);
+    saveProjectState(true);
+    if (res.status === 'saved') {
+      showToast(`Saved as ${res.fileName}`);
+    }
+  };
+
+  const handleOpenSaveAsTemplateModal = () => {
+    const cat = currentProject.documentCategory;
+    const defaultCat: UserTemplateCategory =
+      cat === 'stage' || cat === 'book' || cat === 'television' ? cat : 'film';
+    setTemplateNameInput(`${currentProject.title} Template`);
+    setTemplateCategoryInput(defaultCat);
+    setTemplateDescInput('');
+    setIsSaveTemplateModalOpen(true);
+  };
+
+  const handleConfirmSaveAsTemplate = (e: React.FormEvent) => {
+    e.preventDefault();
+    const next = saveProjectAsUserTemplate(currentProject, {
+      name: templateNameInput.trim() || `${currentProject.title} Template`,
+      category: templateCategoryInput,
+      description: templateDescInput,
+    });
+    setUserTemplates(next);
+    setIsSaveTemplateModalOpen(false);
+    showToast(`Saved template "${templateNameInput.trim() || currentProject.title}"`);
+  };
+
+  const handleCreateFromUserTemplate = (
+    tpl: UserDocumentTemplate,
+    options?: { title?: string; author?: string }
+  ) => {
+    const newProj = instantiateProjectFromUserTemplate(tpl, options);
+    setProjects((prev) => [newProj, ...prev]);
     setCurrentProjectId(newProj.id);
-    setSelectedSceneId('sc-new-1');
+    setSelectedSceneId(newProj.scenes[0]?.id || null);
+    setFocusedElementId(newProj.elements[0]?.id || null);
     setActiveWorkspace('authoring');
-    showToast('Created new screenplay');
+    showToast(`Created from template: ${newProj.title}`);
+  };
+
+  const handleDeleteUserTemplate = (templateId: string) => {
+    setUserTemplates(deleteUserTemplate(templateId));
+    showToast('Removed saved template');
+  };
+
+  const handlePrintPreview = () => {
+    setAutoPrintOnExport(false);
+    setInitialExportFormat('pdf');
+    setIsExportOpen(true);
+  };
+
+  const handlePrintDocument = () => {
+    const res = printScreenplayDocument(
+      currentProject,
+      {
+        includeTitlePage: true,
+        includeSceneNumbers: true,
+        includePageNumbers: true,
+      },
+      true
+    );
+    if (res.printed) {
+      showToast('Print dialog opened for screenplay');
+    } else {
+      showToast(
+        `Print blocked by preview frame — downloaded ${
+          res.fallbackPdfFilename || 'screenplay.pdf'
+        } for printing`
+      );
+    }
+  };
+
+  const handleCloseDocument = () => {
+    saveProjectState(true);
+    setActiveWorkspace('projects');
+    showToast('Document closed — returned to Home');
+  };
+
+  const handleCreateFromDocumentTemplate = (
+    kind: DocumentTemplateKind,
+    options?: { title?: string; author?: string }
+  ) => {
+    const newProj = createProjectFromDocumentTemplate(kind, options);
+    setProjects((prev) => [newProj, ...prev]);
+    setCurrentProjectId(newProj.id);
+    setSelectedSceneId(newProj.scenes[0]?.id || null);
+    setFocusedElementId(newProj.elements[0]?.id || null);
+    setActiveWorkspace('authoring');
+    showToast(`Created ${kind.toUpperCase()} document: ${newProj.title}`);
+  };
+
+  const handleCreateNewProduction = (options: {
+    title: string;
+    author: string;
+    startDate: string;
+    shootDays: number;
+  }) => {
+    const newProj = createNewProductionProject(options);
+    setProjects((prev) => [newProj, ...prev]);
+    setCurrentProjectId(newProj.id);
+    setSelectedSceneId(newProj.scenes[0]?.id || null);
+    setProductionRequestedTab({ tab: 'stripboard', nonce: Date.now() });
+    setActiveWorkspace('production');
+    showToast(`Created production "${newProj.title}"`);
+  };
+
+  const handleImportProductionFromProject = (options: {
+    sourceProjectId: string;
+    targetProjectId: string | 'new';
+    newTitle: string;
+    parts: {
+      strips: boolean;
+      crew: boolean;
+      locations: boolean;
+      tags: boolean;
+      storyboards: boolean;
+    };
+  }) => {
+    const source = projects.find((p) => p.id === options.sourceProjectId);
+    if (!source) return;
+    const target =
+      options.targetProjectId === 'new'
+        ? null
+        : projects.find((p) => p.id === options.targetProjectId) || null;
+
+    const result = cloneProductionAssetsFromProject(
+      source,
+      target,
+      options.parts,
+      options.newTitle
+    );
+
+    if (result.isNew) {
+      setProjects((prev) => [result.project, ...prev]);
+    } else {
+      setProjects((prev) =>
+        prev.map((p) => (p.id === result.project.id ? result.project : p))
+      );
+    }
+
+    setCurrentProjectId(result.project.id);
+    setSelectedSceneId(result.project.scenes[0]?.id || null);
+    setProductionRequestedTab({ tab: 'stripboard', nonce: Date.now() });
+    setActiveWorkspace('production');
+    showToast(`Imported production assets from "${source.title}"`);
+  };
+
+  const handleCreateNewProductionSchedule = (options: {
+    sourceProjectId: string | 'blank';
+    title: string;
+    startDate: string;
+    daysCount: number;
+    callTime: string;
+    wrapTime: string;
+  }) => {
+    if (options.sourceProjectId === 'blank') {
+      const newProj = createNewProductionProject({
+        title: options.title || 'New Shooting Schedule',
+        startDate: options.startDate,
+        shootDays: options.daysCount,
+      });
+      setProjects((prev) => [newProj, ...prev]);
+      setCurrentProjectId(newProj.id);
+      setSelectedSceneId(newProj.scenes[0]?.id || null);
+      setProductionRequestedTab({ tab: 'stripboard', nonce: Date.now() });
+      setActiveWorkspace('production');
+      showToast(`Created ${options.daysCount}-day schedule: "${newProj.title}"`);
+      return;
+    }
+
+    const existing = projects.find((p) => p.id === options.sourceProjectId);
+    if (!existing) return;
+
+    const newStrips = generateNewProductionScheduleStrips(existing.scenes, {
+      startDate: options.startDate,
+      daysCount: options.daysCount,
+      callTime: options.callTime,
+      wrapTime: options.wrapTime,
+    });
+
+    setProjects((prev) =>
+      prev.map((p) =>
+        p.id === existing.id
+          ? {
+              ...p,
+              lastModified: 'Schedule created just now',
+              strips: newStrips,
+            }
+          : p
+      )
+    );
+    setCurrentProjectId(existing.id);
+    setSelectedSceneId(existing.scenes[0]?.id || null);
+    setProductionRequestedTab({ tab: 'stripboard', nonce: Date.now() });
+    setActiveWorkspace('production');
+    showToast(`Generated ${options.daysCount}-day production schedule for "${existing.title}"`);
   };
 
   const handleImportFountain = () => {
@@ -1291,13 +1986,14 @@ export default function App() {
     setProjects([importedProject, ...projects]);
     setCurrentProjectId(importedProject.id);
     setSelectedSceneId(importedProject.scenes[0]?.id || null);
+    setActiveWorkspace('authoring');
     setIsImportOpen(false);
     setImportText('');
     showToast('Fountain script imported successfully!');
   };
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-[#222222] text-gray-200 font-sans select-none">
+    <div className="flex flex-col h-screen w-screen overflow-hidden bg-[#222222] text-gray-200 font-sans select-none print:h-auto print:w-auto print:overflow-visible print:bg-white print:text-black">
       {/* Google Maps Platform Quota Notice (Demo Key Case A) */}
       {gmpQuotaExceeded && (
         <div className="bg-amber-50 border-b border-amber-200 text-amber-900 px-4 py-2.5 text-xs md:text-sm text-center sticky top-0 z-50 shadow-sm">
@@ -1323,12 +2019,19 @@ export default function App() {
         </div>
       )}
 
+      <div className="no-print flex flex-col flex-1 min-h-0 overflow-hidden">
       {/* Top Application Header */}
       <TopHeader
         activeWorkspace={activeWorkspace}
         onSelectWorkspace={setActiveWorkspace}
         projectTitle={currentProject.title}
         onOpenTeleprompter={() => setIsTeleprompterOpen(true)}
+        pendingCollaborationCount={pendingCollaborationCount}
+        onOpenHelp={() => {
+          setHelpInitialCategory('all');
+          setHelpInitialToolId(undefined);
+          setIsHelpGuideOpen(true);
+        }}
       />
 
       {/* Menu Bar with Working Menus */}
@@ -1336,8 +2039,21 @@ export default function App() {
         activeWorkspace={activeWorkspace}
         onSelectWorkspace={setActiveWorkspace}
         onExport={handleExport}
-        onImport={() => setIsImportOpen(true)}
-        onSave={() => saveProjectState(false)}
+        onNewDocument={(kind) => {
+          if (kind) {
+            handleCreateFromDocumentTemplate(kind);
+          } else {
+            setActiveWorkspace('projects');
+          }
+        }}
+        onOpenFromDevice={handleTriggerOpenFromDevice}
+        onSave={handleSaveSccrft}
+        onSaveAs={handleSaveAsSccrft}
+        onSaveAsTemplate={handleOpenSaveAsTemplateModal}
+        onPrintPreview={handlePrintPreview}
+        onPrint={handlePrintDocument}
+        onOpenPreferences={() => setIsPreferencesOpen(true)}
+        onCloseDocument={handleCloseDocument}
         onOpenReports={() => setIsReportsOpen(true)}
         onAddElement={(type) =>
           handleAddElementAfter(
@@ -1348,33 +2064,24 @@ export default function App() {
           )
         }
         onRecalculate={handleRecalculate}
-        onOpenSample={(sampleId) => {
-          setCurrentProjectId(sampleId);
-          setSelectedSceneId(null);
-          setFocusedElementId(null);
-          showToast('Sample screenplay loaded');
-        }}
         onAddDayBreak={handleAddDayBreak}
         onAddComment={() => handleAddComment('Review note added from menu')}
         onOpenCastCrew={() => {
-          setDirectoryInitialView('roster');
+          setProductionRequestedTab({ tab: 'cast_crew', nonce: Date.now() });
           setActiveWorkspace('production');
-          setProductionSubView('cast_crew');
         }}
         onOpenCharacterBreakdown={() => {
-          setDirectoryInitialView('character_breakdown');
-          setActiveWorkspace('production');
-          setProductionSubView('cast_crew');
+          setCharactersInitialSubView('details');
+          setActiveWorkspace('characters');
         }}
         onOpenCallSheet={() => {
           setCallSheetDayNumber(null);
-          setDirectoryInitialView('call_sheet');
+          setProductionRequestedTab({ tab: 'call_sheet', nonce: Date.now() });
           setActiveWorkspace('production');
-          setProductionSubView('cast_crew');
         }}
         onOpenLocationMap={() => {
+          setProductionRequestedTab({ tab: 'location_map', nonce: Date.now() });
           setActiveWorkspace('production');
-          setProductionSubView('location_map');
         }}
         onOpenNLEPipeline={() => setIsNLEPipelineOpen(true)}
         onOpenRevisionImpact={() => setIsRevisionImpactOpen(true)}
@@ -1386,12 +2093,10 @@ export default function App() {
           setHelpInitialToolId(toolId);
           setIsHelpGuideOpen(true);
         }}
-        currentProject={currentProject}
-        sampleProjects={projects}
       />
 
-      {/* Formatting & Production Ribbon Toolbar (Only in Authoring & Production) */}
-      {(activeWorkspace === 'authoring' || activeWorkspace === 'production') && (
+      {/* Formatting Ribbon Toolbar (Authoring Workspace) */}
+      {activeWorkspace === 'authoring' && (
         <FormattingToolbar
           activeWorkspace={activeWorkspace}
           currentElementType={currentElementType}
@@ -1406,6 +2111,71 @@ export default function App() {
               handleUpdateElementType(targetId, type);
             }
           }}
+          effectiveFormatting={effectiveFormatting}
+          editorTypography={projectTypography}
+          onToggleBold={() => {
+            if (activeTargetElement) {
+              handleUpdateElementFormatting(activeTargetElement.id, {
+                bold: !effectiveFormatting.bold,
+              });
+            }
+          }}
+          onToggleItalic={() => {
+            if (activeTargetElement) {
+              handleUpdateElementFormatting(activeTargetElement.id, {
+                italic: !effectiveFormatting.italic,
+              });
+            }
+          }}
+          onToggleUnderline={() => {
+            if (activeTargetElement) {
+              handleUpdateElementFormatting(activeTargetElement.id, {
+                underline: !effectiveFormatting.underline,
+              });
+            }
+          }}
+          onToggleStrikethrough={() => {
+            if (activeTargetElement) {
+              handleUpdateElementFormatting(activeTargetElement.id, {
+                strikethrough: !effectiveFormatting.strikethrough,
+              });
+            }
+          }}
+          onSetHighlight={(color) => {
+            if (activeTargetElement) {
+              handleUpdateElementFormatting(activeTargetElement.id, { highlight: color });
+            }
+          }}
+          onSetAlign={(align) => {
+            if (activeTargetElement) {
+              handleUpdateElementFormatting(activeTargetElement.id, { align });
+            }
+          }}
+          onChangeFontFamily={(fontFamily) => handleUpdateProjectTypography({ fontFamily })}
+          onChangeFontSize={(fontSizePt) => handleUpdateProjectTypography({ fontSizePt })}
+          onChangeLineSpacing={(lineSpacing) => handleUpdateProjectTypography({ lineSpacing })}
+          onChangePageLayout={(pageLayout) => handleUpdateProjectTypography({ pageLayout })}
+          onOpenSpellCheck={() => {
+            setIsRightPanelCollapsed(false);
+            setInspectorRequestedTab({ tab: 'proofread', subMode: 'spelling', nonce: Date.now() });
+          }}
+          onOpenGrammarCheck={() => {
+            setIsRightPanelCollapsed(false);
+            setInspectorRequestedTab({ tab: 'proofread', subMode: 'grammar', nonce: Date.now() });
+          }}
+          onOpenDraftRevisions={() => {
+            setIsRightPanelCollapsed(false);
+            setInspectorRequestedTab({ tab: 'history', nonce: Date.now() });
+          }}
+          onOpenCharacterInfo={() => {
+            setIsRightPanelCollapsed(false);
+            setInspectorRequestedTab({ tab: 'characters', nonce: Date.now() });
+          }}
+          proofreadCounts={{
+            spelling: proofreadReport.spellingCount,
+            grammar: proofreadReport.grammarCount,
+          }}
+          onOpenElementsPopup={() => setElementsPopupTriggerNonce((n) => n + 1)}
           documentTitle={currentProject.title}
           onRecalculate={handleRecalculate}
           onOpenReports={() => setIsReportsOpen(true)}
@@ -1439,7 +2209,7 @@ export default function App() {
 
       {/* Main Workspace Body */}
       <div className="flex flex-1 min-h-0 overflow-hidden relative">
-        {/* Workspace 1 & 2: Authoring (Script Editor) OR Production (Stripboard) with 3-Column Layout! */}
+        {/* Workspace 1 & 4: Authoring (Script Editor) OR Production Hub */}
         {(activeWorkspace === 'authoring' || activeWorkspace === 'production') && (
           <div className="flex flex-1 w-full h-full min-h-0">
             {/* Column 1: Left Navigation / Outline / Strip Properties */}
@@ -1455,7 +2225,6 @@ export default function App() {
               onToggleCollapse={() => setIsLeftPanelCollapsed((prev) => !prev)}
             />
 
-            {/* Column 2 & 3: Authoring Editor OR Production Stripboard / Cast & Crew Address Book */}
             {activeWorkspace === 'authoring' ? (
               <>
                 <div className="relative flex-1 flex min-w-0 min-h-0">
@@ -1469,6 +2238,12 @@ export default function App() {
                     revisions={currentProject.revisions || []}
                     isRevisionPassMode={isRevisionPassMode}
                     continuityAlertsByElementId={continuityReport.alertsByElementId}
+                    collaborators={currentProject.collaborators || []}
+                    collaboratorSuggestions={currentProject.collaboratorSuggestions || []}
+                    onInspectSuggestion={(suggestionId) => {
+                      setSelectedSuggestionId(suggestionId);
+                      setActiveWorkspace('collaboration');
+                    }}
                     focusedElementId={focusedElementId}
                     onInspectContinuityElement={(elId) => {
                       setFocusedElementId(elId);
@@ -1477,9 +2252,12 @@ export default function App() {
                     }}
                     scriptFormat={currentProject.scriptFormat || 'single_column_film'}
                     onChangeScriptFormat={handleChangeScriptFormat}
+                    editorTypography={projectTypography}
+                    elementsPopupTriggerNonce={elementsPopupTriggerNonce}
                     onAddStoryboardImageForScene={handleAddStoryboardImageForScene}
                     onUpdateElement={handleUpdateElement}
                     onUpdateElementType={handleUpdateElementType}
+                    onUpdateElementFormatting={handleUpdateElementFormatting}
                     onUpdateElementCharacter={handleUpdateElementCharacter}
                     onAddElementAfter={handleAddElementAfter}
                     onDeleteElement={handleDeleteElement}
@@ -1522,13 +2300,18 @@ export default function App() {
 
                 <InspectorColumn
                   selectedScene={currentProject.scenes.find((s) => s.id === selectedSceneId)}
+                  allScenes={currentProject.scenes}
+                  elements={currentProject.elements}
                   comments={currentProject.comments}
                   tags={currentProject.tags}
                   characters={currentProject.characters}
+                  characterBios={currentProject.projectBible?.characterBios || []}
+                  characterBreakdowns={currentProject.characterBreakdowns || []}
                   storyboards={currentProject.storyboards || []}
                   revisions={currentProject.revisions || []}
                   activeDraftName={currentProject.activeDraftName}
                   activeDraftColor={currentProject.activeDraftColor}
+                  customDictionary={currentProject.customDictionary || []}
                   onAddComment={(text) => handleAddComment(text)}
                   onResolveComment={handleResolveComment}
                   onDeleteComment={handleDeleteComment}
@@ -1539,6 +2322,13 @@ export default function App() {
                   onAddStoryboardFrame={handleQuickAddStoryboardFrame}
                   onRevertRevision={handleRevertRevision}
                   onCreateDraftMilestone={handleCreateDraftMilestone}
+                  onApplyElementTextFix={handleApplyElementTextFix}
+                  onAddToDictionary={handleAddToDictionary}
+                  onJumpToElement={handleJumpToElement}
+                  onOpenCharactersWorkspace={() => {
+                    setCharactersInitialSubView('details');
+                    setActiveWorkspace('characters');
+                  }}
                   continuityReport={continuityReport}
                   onJumpToOccurrence={handleJumpToContinuityOccurrence}
                   onAcknowledgeContinuity={handleAcknowledgeContinuity}
@@ -1549,121 +2339,130 @@ export default function App() {
                   onToggleCollapse={() => setIsRightPanelCollapsed((prev) => !prev)}
                 />
               </>
-            ) : productionSubView === 'cast_crew' ? (
-              <CastCrewDirectory
+            ) : (
+              <ProductionWorkspace
+                projects={projects}
                 project={currentProject}
-                projectTitle={currentProject.title}
-                projectAuthor={currentProject.author}
-                draftName={currentProject.activeDraftName}
-                members={currentProject.crewMembers || []}
-                scenes={currentProject.scenes}
-                strips={currentProject.strips}
-                characters={currentProject.characters}
-                tags={currentProject.tags}
-                elements={currentProject.elements}
-                comments={currentProject.comments}
-                characterBreakdowns={currentProject.characterBreakdowns}
-                initialDirectoryView={directoryInitialView}
-                initialCallSheetDay={callSheetDayNumber}
-                onAddMember={handleAddCrewMember}
-                onUpdateMember={handleUpdateCrewMember}
-                onDeleteMember={handleDeleteCrewMember}
-                onAddConnection={handleAddCrewConnection}
-                onRemoveConnection={handleRemoveCrewConnection}
+                requestedTab={productionRequestedTab}
+                callSheetDayNumber={callSheetDayNumber}
+                selectedSceneId={selectedSceneId}
+                locationCount={uniqueLocationCount}
+                pendingSyncCount={revisionImpactReport.totalImpactedScenes}
+                onSelectScene={setSelectedSceneId}
+                onJumpToAuthoringScene={(sceneId) => {
+                  if (sceneId) setSelectedSceneId(sceneId);
+                  setActiveWorkspace('authoring');
+                }}
+                onUpdateStrips={handleUpdateStrips}
+                onAddDayBreak={handleAddDayBreak}
+                onAddMealBreak={handleAddMealBreak}
+                onAddCrewMember={handleAddCrewMember}
+                onUpdateCrewMember={handleUpdateCrewMember}
+                onDeleteCrewMember={handleDeleteCrewMember}
+                onAddCrewConnection={handleAddCrewConnection}
+                onRemoveCrewConnection={handleRemoveCrewConnection}
                 onUpdateCharacterBreakdown={handleUpdateCharacterBreakdown}
                 onResetCharacterBreakdown={handleResetCharacterBreakdown}
                 onCreateCharacterTag={handleCreateCharacterTag}
                 onUpdateCharacterRelationships={handleUpdateCharacterRelationships}
                 onUpdateCharacterNodePositions={handleUpdateCharacterNodePositions}
-                locationCount={uniqueLocationCount}
-                onSwitchSubView={(view) => {
-                  if (view === 'cast_crew') setDirectoryInitialView('roster');
-                  setProductionSubView(view);
-                }}
-                onSelectScene={(sceneId) => {
-                  setSelectedSceneId(sceneId);
-                  setActiveWorkspace('authoring');
-                }}
-                onImportScriptCast={handleImportScriptCast}
-              />
-            ) : productionSubView === 'location_map' ? (
-              <LocationMapView
-                projectTitle={currentProject.title}
-                scenes={currentProject.scenes}
-                savedLocations={currentProject.locations || []}
-                crewCount={(currentProject.crewMembers || []).length}
+                onUpdateCharacterEdgePositions={handleUpdateCharacterEdgePositions}
                 onUpdateLocations={handleUpdateLocations}
-                onSwitchSubView={(view) => {
-                  if (view === 'cast_crew') setDirectoryInitialView('roster');
-                  setProductionSubView(view);
-                }}
-                onSelectScene={(sceneId) => {
-                  setSelectedSceneId(sceneId);
-                  setActiveWorkspace('authoring');
-                }}
+                onUpdateEquipment={handleUpdateEquipmentManifest}
+                onUpdateFinanceSettings={handleUpdateFinanceSettings}
+                onRecalculateFinances={handleRecalculateFinances}
+                onUpdateProjectBible={handleUpdateProjectBible}
+                onUpdateStoryboards={handleUpdateStoryboards}
+                onImportScriptCast={handleImportScriptCast}
+                onOpenRevisionImpact={() => setIsRevisionImpactOpen(true)}
+                onOpenNLEPipeline={() => setIsNLEPipelineOpen(true)}
+                onOpenReports={() => setIsReportsOpen(true)}
+                onNotify={showToast}
+                rightInspector={
+                  <InspectorColumn
+                    selectedScene={currentProject.scenes.find((s) => s.id === selectedSceneId)}
+                    allScenes={currentProject.scenes}
+                    elements={currentProject.elements}
+                    comments={currentProject.comments}
+                    tags={currentProject.tags}
+                    characters={currentProject.characters}
+                    characterBios={currentProject.projectBible?.characterBios || []}
+                    characterBreakdowns={currentProject.characterBreakdowns || []}
+                    storyboards={currentProject.storyboards || []}
+                    revisions={currentProject.revisions || []}
+                    activeDraftName={currentProject.activeDraftName}
+                    activeDraftColor={currentProject.activeDraftColor}
+                    customDictionary={currentProject.customDictionary || []}
+                    onAddComment={(text) => handleAddComment(text)}
+                    onResolveComment={handleResolveComment}
+                    onDeleteComment={handleDeleteComment}
+                    onAddTag={handleAddTag}
+                    onUpdateTagImage={handleUpdateTagImage}
+                    onUpdateScene={handleUpdateScene}
+                    onOpenStoryboard={() => setActiveWorkspace('storyboard')}
+                    onAddStoryboardFrame={handleQuickAddStoryboardFrame}
+                    onRevertRevision={handleRevertRevision}
+                    onCreateDraftMilestone={handleCreateDraftMilestone}
+                    onApplyElementTextFix={handleApplyElementTextFix}
+                    onAddToDictionary={handleAddToDictionary}
+                    onJumpToElement={handleJumpToElement}
+                    onOpenCharactersWorkspace={() => {
+                      setCharactersInitialSubView('details');
+                      setActiveWorkspace('characters');
+                    }}
+                    continuityReport={continuityReport}
+                    onJumpToOccurrence={handleJumpToContinuityOccurrence}
+                    onAcknowledgeContinuity={handleAcknowledgeContinuity}
+                    onRestoreContinuity={handleRestoreContinuity}
+                    onOpenContinuityModal={() => setIsContinuityModalOpen(true)}
+                    requestedTab={inspectorRequestedTab}
+                    isCollapsed={isRightPanelCollapsed}
+                    onToggleCollapse={() => setIsRightPanelCollapsed((prev) => !prev)}
+                  />
+                }
               />
-            ) : (
-              <>
-                <StripboardView
-                  strips={currentProject.strips}
-                  scenes={currentProject.scenes}
-                  elements={currentProject.elements}
-                  locations={currentProject.locations}
-                  selectedSceneId={selectedSceneId}
-                  onSelectScene={setSelectedSceneId}
-                  onUpdateStrips={handleUpdateStrips}
-                  onAddDayBreak={handleAddDayBreak}
-                  onAddMealBreak={handleAddMealBreak}
-                  crewCount={(currentProject.crewMembers || []).length}
-                  locationCount={uniqueLocationCount}
-                  pendingSyncCount={revisionImpactReport.totalImpactedScenes}
-                  onOpenRevisionImpact={() => setIsRevisionImpactOpen(true)}
-                  onNotify={showToast}
-                  onSwitchSubView={(view) => {
-                    if (view === 'cast_crew') setDirectoryInitialView('roster');
-                    setProductionSubView(view);
-                  }}
-                  onOpenCallSheet={(dayNum) => {
-                    setCallSheetDayNumber(dayNum ?? null);
-                    setDirectoryInitialView('call_sheet');
-                    setProductionSubView('cast_crew');
-                  }}
-                />
-
-                <InspectorColumn
-                  selectedScene={currentProject.scenes.find((s) => s.id === selectedSceneId)}
-                  comments={currentProject.comments}
-                  tags={currentProject.tags}
-                  characters={currentProject.characters}
-                  storyboards={currentProject.storyboards || []}
-                  revisions={currentProject.revisions || []}
-                  activeDraftName={currentProject.activeDraftName}
-                  activeDraftColor={currentProject.activeDraftColor}
-                  onAddComment={(text) => handleAddComment(text)}
-                  onResolveComment={handleResolveComment}
-                  onDeleteComment={handleDeleteComment}
-                  onAddTag={handleAddTag}
-                  onUpdateTagImage={handleUpdateTagImage}
-                  onUpdateScene={handleUpdateScene}
-                  onOpenStoryboard={() => setActiveWorkspace('storyboard')}
-                  onAddStoryboardFrame={handleQuickAddStoryboardFrame}
-                  onRevertRevision={handleRevertRevision}
-                  onCreateDraftMilestone={handleCreateDraftMilestone}
-                  continuityReport={continuityReport}
-                  onJumpToOccurrence={handleJumpToContinuityOccurrence}
-                  onAcknowledgeContinuity={handleAcknowledgeContinuity}
-                  onRestoreContinuity={handleRestoreContinuity}
-                  onOpenContinuityModal={() => setIsContinuityModalOpen(true)}
-                  requestedTab={inspectorRequestedTab}
-                  isCollapsed={isRightPanelCollapsed}
-                  onToggleCollapse={() => setIsRightPanelCollapsed((prev) => !prev)}
-                />
-              </>
             )}
           </div>
         )}
 
-        {/* Workspace: Unified Project Bible & Pitch Hub */}
+        {/* Workspace 2: Characters Workspace (Details, Bios & Draggable Node Connections) */}
+        {activeWorkspace === 'characters' && (
+          <CharactersWorkspace
+            project={currentProject}
+            initialSubView={charactersInitialSubView}
+            onUpdateCharacters={handleUpdateCharacters}
+            onUpdateCharacterBreakdown={handleUpdateCharacterBreakdown}
+            onResetCharacterBreakdown={handleResetCharacterBreakdown}
+            onUpdateProjectBible={handleUpdateProjectBible}
+            onUpdateRelationships={handleUpdateCharacterRelationships}
+            onUpdateNodePositions={handleUpdateCharacterNodePositions}
+            onUpdateEdgePositions={handleUpdateCharacterEdgePositions}
+            onCreateCharacterTag={handleCreateCharacterTag}
+            onSelectScene={(sceneId) => {
+              setSelectedSceneId(sceneId);
+              setActiveWorkspace('authoring');
+            }}
+          />
+        )}
+
+        {/* Workspace 3: Outline & Beat Board */}
+        {activeWorkspace === 'outline' && (
+          <OutlineWorkspace
+            project={currentProject}
+            selectedSceneId={selectedSceneId}
+            onSelectScene={setSelectedSceneId}
+            onOpenSceneInAuthoring={(sceneId, elementId) => {
+              setSelectedSceneId(sceneId);
+              if (elementId) setFocusedElementId(elementId);
+              setActiveWorkspace('authoring');
+            }}
+            onUpdateScene={handleUpdateScene}
+            onReorderScene={handleReorderScene}
+            onAddNewScene={handleAddNewScene}
+          />
+        )}
+
+        {/* Legacy Project Bible container fallback */}
         {activeWorkspace === 'project_bible' && (
           <ProjectContainerView
             project={currentProject}
@@ -1680,7 +2479,7 @@ export default function App() {
           />
         )}
 
-        {/* Workspace: Storyboard & Animatic Suite */}
+        {/* Workspace 5: Storyboarding Suite */}
         {activeWorkspace === 'storyboard' && (
           <StoryboardWorkspace
             project={currentProject}
@@ -1694,23 +2493,63 @@ export default function App() {
           />
         )}
 
-        {/* Workspace 3: Rust Desktop Engine & Native Installer Hub */}
-        {activeWorkspace === 'rust_engine' && (
-          <RustDesktopHub currentProject={currentProject} />
+        {/* Workspace 6: Team Collaboration & Non-Destructive Color Redlines */}
+        {activeWorkspace === 'collaboration' && (
+          <CollaborationWorkspace
+            project={currentProject}
+            initialSelectedSuggestionId={selectedSuggestionId}
+            onUpdateCollaborators={handleUpdateCollaborators}
+            onAddSuggestion={handleAddCollaboratorSuggestion}
+            onAcceptSuggestion={handleAcceptCollaboratorSuggestion}
+            onRejectSuggestion={handleRejectCollaboratorSuggestion}
+            onReopenSuggestion={handleReopenCollaboratorSuggestion}
+            onDeleteSuggestion={handleDeleteCollaboratorSuggestion}
+            onJumpToSceneElement={(sceneId, elementId) => {
+              if (sceneId) setSelectedSceneId(sceneId);
+              if (elementId) setFocusedElementId(elementId);
+              setActiveWorkspace('authoring');
+            }}
+          />
         )}
 
-        {/* Workspace 4: Projects Browser */}
+        {/* Workspace 7: Dedicated Teleprompter Workspace */}
+        {activeWorkspace === 'teleprompter' && (
+          <TeleprompterWindow
+            projects={projects}
+            initialProjectId={currentProject.id}
+            embedded={true}
+          />
+        )}
+
+        {/* Home (Projects & Templates Launch Hub) */}
         {activeWorkspace === 'projects' && (
           <ProjectsBrowser
             projects={projects}
             currentProjectId={currentProjectId}
-            onSelectProject={(id) => {
+            userTemplates={userTemplates}
+            onSelectProject={(id, workspace = 'authoring', subView = 'stripboard') => {
               setCurrentProjectId(id);
               setSelectedSceneId(null);
-              setActiveWorkspace('authoring');
+              setFocusedElementId(null);
+              if (workspace === 'production') {
+                const mappedTab: ProductionHubTab =
+                  subView === 'cast_crew'
+                    ? 'cast_crew'
+                    : subView === 'location_map'
+                    ? 'location_map'
+                    : 'stripboard';
+                setProductionRequestedTab({ tab: mappedTab, nonce: Date.now() });
+              }
+              setActiveWorkspace(workspace);
             }}
-            onCreateNewProject={handleCreateNewProject}
-            onExportRust={(proj) => handleExport('rust_zip')}
+            onCreateFromDocumentTemplate={handleCreateFromDocumentTemplate}
+            onCreateFromUserTemplate={handleCreateFromUserTemplate}
+            onDeleteUserTemplate={handleDeleteUserTemplate}
+            onOpenFromDevice={handleTriggerOpenFromDevice}
+            onCreateNewProduction={handleCreateNewProduction}
+            onImportProductionFromProject={handleImportProductionFromProject}
+            onCreateNewProductionSchedule={handleCreateNewProductionSchedule}
+            onOpenImportScriptModal={() => setIsImportOpen(true)}
           />
         )}
       </div>
@@ -1762,13 +2601,18 @@ export default function App() {
           </span>
         </div>
       </footer>
+      </div>
 
-      {/* Export Modal */}
+      {/* Export / Print Preview Modal */}
       {isExportOpen && (
         <ExportModal
           project={currentProject}
           initialFormat={initialExportFormat}
-          onClose={() => setIsExportOpen(false)}
+          autoPrint={autoPrintOnExport}
+          onClose={() => {
+            setIsExportOpen(false);
+            setAutoPrintOnExport(false);
+          }}
           onRecordGeneratedSidecar={handleRecordGeneratedSidecar}
         />
       )}
@@ -1823,6 +2667,15 @@ export default function App() {
         />
       )}
 
+      {/* Preferences & Dedicated >_ Rust Desktop Window */}
+      {isPreferencesOpen && (
+        <PreferencesModal
+          project={currentProject}
+          onUpdateTypography={handleUpdateProjectTypography}
+          onClose={() => setIsPreferencesOpen(false)}
+        />
+      )}
+
       {/* Interactive User Guide & Tool Documentation */}
       {isHelpGuideOpen && (
         <HelpGuideModal
@@ -1838,24 +2691,21 @@ export default function App() {
             onOpenExportModal: () => setIsExportOpen(true),
             onOpenReports: () => setIsReportsOpen(true),
             onOpenCastCrew: () => {
-              setDirectoryInitialView('roster');
+              setProductionRequestedTab({ tab: 'cast_crew', nonce: Date.now() });
               setActiveWorkspace('production');
-              setProductionSubView('cast_crew');
             },
             onOpenCharacterConnections: () => {
-              setDirectoryInitialView('connections');
-              setActiveWorkspace('production');
-              setProductionSubView('cast_crew');
+              setCharactersInitialSubView('connections');
+              setActiveWorkspace('characters');
             },
             onOpenCallSheet: () => {
               setCallSheetDayNumber(null);
-              setDirectoryInitialView('call_sheet');
+              setProductionRequestedTab({ tab: 'call_sheet', nonce: Date.now() });
               setActiveWorkspace('production');
-              setProductionSubView('cast_crew');
             },
             onOpenLocationMap: () => {
+              setProductionRequestedTab({ tab: 'location_map', nonce: Date.now() });
               setActiveWorkspace('production');
-              setProductionSubView('location_map');
             },
             onOpenRevisionImpact: () => setIsRevisionImpactOpen(true),
             onToggleFocusCenter: () => {
@@ -1915,6 +2765,160 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Save As (.sccrft) Modal */}
+      {isSaveAsModalOpen && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-50 select-none">
+          <form
+            onSubmit={handleConfirmSaveAsModal}
+            className="bg-[#242424] border border-[#444] rounded-lg shadow-2xl w-full max-w-md text-xs text-gray-200 overflow-hidden"
+          >
+            <div className="px-4 py-3 bg-[#1d1d1d] border-b border-[#383838] flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Download className="w-4 h-4 text-[#ff7700]" />
+                <span className="font-bold text-sm text-gray-100">Save Document As (.sccrft)</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSaveAsModalOpen(false)}
+                className="text-gray-400 hover:text-white p-1"
+                aria-label="Close Save As dialog"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4 space-y-3">
+              <p className="text-gray-400">
+                Save a local ScreenCraft (<span className="font-mono text-amber-300">.sccrft</span>) copy containing your script, formatting, stripboard, cast/crew, and scene notes.
+              </p>
+              <label className="block space-y-1">
+                <span className="text-[11px] font-semibold text-gray-300 block">
+                  File Name
+                </span>
+                <input
+                  type="text"
+                  autoFocus
+                  value={saveAsFileName}
+                  onChange={(e) => setSaveAsFileName(e.target.value)}
+                  placeholder="my_screenplay.sccrft"
+                  className="w-full bg-[#151515] border border-[#3e3e3e] focus:border-[#ff8000] focus:outline-none rounded px-3 py-2 font-mono text-xs text-white"
+                />
+              </label>
+            </div>
+            <div className="px-4 py-3 bg-[#1e1e1e] border-t border-[#383838] flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsSaveAsModalOpen(false)}
+                className="px-3 py-1.5 bg-[#2d2d2d] hover:bg-[#383838] text-gray-300 rounded"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-1.5 bg-[#ff7700] hover:bg-[#ff8c1a] text-black font-bold rounded flex items-center gap-1.5"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>Save .sccrft File</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Save as Template Modal */}
+      {isSaveTemplateModalOpen && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-50 select-none">
+          <form
+            onSubmit={handleConfirmSaveAsTemplate}
+            className="bg-[#242424] border border-[#444] rounded-lg shadow-2xl w-full max-w-md text-xs text-gray-200 overflow-hidden"
+          >
+            <div className="px-4 py-3 bg-[#1d1d1d] border-b border-[#383838] flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <BookmarkPlus className="w-4 h-4 text-violet-300" />
+                <span className="font-bold text-sm text-gray-100">Save Document as Template</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSaveTemplateModalOpen(false)}
+                className="text-gray-400 hover:text-white p-1"
+                aria-label="Close Save as Template dialog"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4 space-y-3">
+              <p className="text-gray-400">
+                Save this document structure as a reusable template in your Home Screen Authoring section.
+              </p>
+              <label className="block space-y-1">
+                <span className="text-[11px] font-semibold text-gray-300 block">
+                  Template Name
+                </span>
+                <input
+                  type="text"
+                  autoFocus
+                  value={templateNameInput}
+                  onChange={(e) => setTemplateNameInput(e.target.value)}
+                  placeholder="Half-Hour Sitcom Format"
+                  className="w-full bg-[#151515] border border-[#3e3e3e] focus:border-violet-400 focus:outline-none rounded px-3 py-1.5 text-xs text-white"
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-[11px] font-semibold text-gray-300 block">
+                  Document Category
+                </span>
+                <select
+                  value={templateCategoryInput}
+                  onChange={(e) => setTemplateCategoryInput(e.target.value as UserTemplateCategory)}
+                  className="w-full bg-[#151515] border border-[#3e3e3e] focus:border-violet-400 focus:outline-none rounded px-2.5 py-1.5 text-xs text-white"
+                >
+                  <option value="film">Film Script</option>
+                  <option value="stage">Stage Play</option>
+                  <option value="book">Book Manuscript</option>
+                  <option value="television">Television Script</option>
+                </select>
+              </label>
+              <label className="block space-y-1">
+                <span className="text-[11px] font-semibold text-gray-300 block">
+                  Notes / Description (optional)
+                </span>
+                <input
+                  type="text"
+                  value={templateDescInput}
+                  onChange={(e) => setTemplateDescInput(e.target.value)}
+                  placeholder="Includes act structure, typography, and scene setup..."
+                  className="w-full bg-[#151515] border border-[#3e3e3e] focus:border-violet-400 focus:outline-none rounded px-3 py-1.5 text-xs text-white"
+                />
+              </label>
+            </div>
+            <div className="px-4 py-3 bg-[#1e1e1e] border-t border-[#383838] flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsSaveTemplateModalOpen(false)}
+                className="px-3 py-1.5 bg-[#2d2d2d] hover:bg-[#383838] text-gray-300 rounded"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-1.5 bg-violet-500 hover:bg-violet-400 text-white font-bold rounded flex items-center gap-1.5"
+              >
+                <BookmarkPlus className="w-3.5 h-3.5" />
+                <span>Save Template</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Hidden Device File Input for .sccrft, .fdx, .fountain */}
+      <input
+        ref={deviceFileInputRef}
+        type="file"
+        accept=".sccrft,.fdx,.fountain,.txt"
+        onChange={handleDeviceFileSelected}
+        className="hidden"
+      />
     </div>
   );
 }

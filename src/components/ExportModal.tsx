@@ -35,10 +35,13 @@ import {
   PaginatedScriptBlock,
   PaginatedScriptPage,
 } from '../utils/exportPreviewFormatter';
+import { downloadScreenplayPdf } from '../utils/screenplayPdfGenerator';
+import { printScreenplayDocument } from '../utils/printHelper';
 
 interface ExportModalProps {
   project: StoryProject;
   initialFormat?: ExportFormatType;
+  autoPrint?: boolean;
   onClose: () => void;
   onRecordGeneratedSidecar?: (entry: NLEGeneratedSidecarEntry) => void;
 }
@@ -97,6 +100,7 @@ const FORMAT_ITEMS: {
 export const ExportModal: React.FC<ExportModalProps> = ({
   project,
   initialFormat = 'pdf',
+  autoPrint = false,
   onClose,
   onRecordGeneratedSidecar,
 }) => {
@@ -118,6 +122,24 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   useEffect(() => {
     setExportFormat(initialFormat);
   }, [initialFormat]);
+
+  useEffect(() => {
+    if (!autoPrint) return;
+    const res = printScreenplayDocument(
+      project,
+      {
+        includeTitlePage,
+        includeSceneNumbers,
+        includePageNumbers,
+      },
+      true
+    );
+    setExportedStatus(
+      res.printed
+        ? 'Print dialog opened for screenplay'
+        : `Preview frame blocked Print dialog — downloaded ${res.fallbackPdfFilename || 'screenplay.pdf'}`
+    );
+  }, [autoPrint]);
 
   // Reset to sensible default view mode when switching between script & code/data formats
   useEffect(() => {
@@ -239,15 +261,52 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
       } else if (exportFormat === 'pdf') {
-        window.print();
+        const pdfResult = downloadScreenplayPdf(project, {
+          includeTitlePage,
+          includeSceneNumbers,
+          includePageNumbers,
+        });
+        setExportedStatus(
+          `Downloaded ${pdfResult.filename} (${pdfResult.pageCount} page${
+            pdfResult.pageCount === 1 ? '' : 's'
+          })`
+        );
+        setTimeout(() => setExportedStatus(null), 4000);
+        return;
       }
-      setExportedStatus(`Exported ${exportFormat.toUpperCase()} (${preview.summary.totalOutputPages} page${preview.summary.totalOutputPages === 1 ? '' : 's'})`);
+      setExportedStatus(
+        `Exported ${exportFormat.toUpperCase()} (${preview.summary.totalOutputPages} page${
+          preview.summary.totalOutputPages === 1 ? '' : 's'
+        })`
+      );
       setTimeout(() => setExportedStatus(null), 3500);
     } catch (err) {
       console.error(err);
     } finally {
       setIsExporting(false);
     }
+  };
+
+  const handleDirectPrint = () => {
+    const res = printScreenplayDocument(
+      project,
+      {
+        includeTitlePage,
+        includeSceneNumbers,
+        includePageNumbers,
+      },
+      true
+    );
+    setExportedStatus(
+      res.printed
+        ? `Sent ${preview.summary.totalOutputPages} page${
+            preview.summary.totalOutputPages === 1 ? '' : 's'
+          } to printer`
+        : `Print dialog blocked in preview frame — downloaded ${
+            res.fallbackPdfFilename || 'screenplay.pdf'
+          } for printing`
+    );
+    setTimeout(() => setExportedStatus(null), 4500);
   };
 
   const handleCopySource = async () => {
@@ -371,10 +430,42 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       );
     }
 
-    // ACTION / GENERAL
+    if (block.type === 'NEW_ACT' || block.type === 'END_OF_ACT') {
+      return (
+        <div
+          className="flex items-baseline justify-between font-bold uppercase underline underline-offset-4 text-black"
+          style={{
+            marginTop: block.spaceBefore > 0 ? `${block.spaceBefore * 1.1}em` : '0',
+            marginBottom: block.spaceAfter > 0 ? `${block.spaceAfter * 1.0}em` : '0',
+          }}
+        >
+          <span className="whitespace-pre-wrap text-center flex-1">{textContent}</span>
+          {fdxTagOverlay}
+        </div>
+      );
+    }
+
+    if (block.type === 'NOTE') {
+      return (
+        <div
+          className="flex items-baseline justify-between italic text-amber-900 bg-amber-50/70 border border-amber-200 px-2 py-1 rounded"
+          style={{
+            marginTop: block.spaceBefore > 0 ? `${block.spaceBefore * 1.0}em` : '0',
+            marginBottom: block.spaceAfter > 0 ? `${block.spaceAfter * 1.0}em` : '0',
+          }}
+        >
+          <span className="whitespace-pre-wrap flex-1">[[NOTE: {textContent}]]</span>
+          {fdxTagOverlay}
+        </div>
+      );
+    }
+
+    // ACTION / GENERAL / SEQUENCE / CAST_LIST / OUTLINE_* / SUMMARY
     return (
       <div
-        className="flex items-baseline justify-between text-black"
+        className={`flex items-baseline justify-between text-black ${
+          block.type === 'SEQUENCE' || block.type === 'OUTLINE_1' ? 'font-bold' : ''
+        } ${block.type === 'SUMMARY' || block.type === 'OUTLINE_3' ? 'italic text-gray-700' : ''}`}
         style={{
           marginTop: block.spaceBefore > 0 ? `${block.spaceBefore * 1.0}em` : '0',
           marginBottom: block.spaceAfter > 0 ? `${block.spaceAfter * 1.0}em` : '0',
@@ -947,6 +1038,15 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               </button>
               <button
                 type="button"
+                onClick={handleDirectPrint}
+                className="px-3.5 py-1.5 bg-[#262626] hover:bg-[#323232] border border-[#4a4a4a] text-gray-100 rounded font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap"
+                title="Open print dialog for formatted screenplay (downloads PDF automatically if browser blocks print)"
+              >
+                <Printer className="w-3.5 h-3.5 text-amber-400" />
+                <span>Print...</span>
+              </button>
+              <button
+                type="button"
                 onClick={handleDownload}
                 disabled={isExporting}
                 className="px-4 py-1.5 bg-[#ff7700] hover:bg-[#ff8c1a] disabled:opacity-40 text-white font-bold rounded flex items-center gap-1.5 shadow transition-colors whitespace-nowrap"
@@ -956,7 +1056,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   {isExporting
                     ? 'Generating...'
                     : exportFormat === 'pdf'
-                    ? `Print / Save PDF (${preview.summary.totalOutputPages} pgs)`
+                    ? `Export PDF (${preview.summary.totalOutputPages} pgs)`
                     : `Export ${exportFormat.toUpperCase()}`}
                 </span>
               </button>
