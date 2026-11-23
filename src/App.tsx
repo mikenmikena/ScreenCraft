@@ -39,7 +39,7 @@ import {
 } from './utils/projectTemplates';
 import { SAMPLE_PROJECTS } from './data/sampleScripts';
 import { TopHeader } from './components/TopHeader';
-import { MenuBar } from './components/MenuBar';
+import { MenuBar, AuthoringViewMode } from './components/MenuBar';
 import { FormattingToolbar } from './components/FormattingToolbar';
 import { OutlineColumn } from './components/OutlineColumn';
 import { ScreenplayEditor } from './components/ScreenplayEditor';
@@ -51,6 +51,13 @@ import { OutlineWorkspace } from './components/OutlineWorkspace';
 import { ProductionWorkspace, ProductionHubTab } from './components/ProductionWorkspace';
 import { CollaborationWorkspace } from './components/CollaborationWorkspace';
 import { PreferencesModal } from './components/PreferencesModal';
+import {
+  GoToModal,
+  FindReplaceModal,
+  CharacterActionModal,
+  CharacterModalMode,
+  EmojiSymbolsModal,
+} from './components/EditToolsModals';
 import { ProjectsBrowser } from './components/ProjectsBrowser';
 import { ExportModal } from './components/ExportModal';
 import { ReportsModal } from './components/ReportsModal';
@@ -194,10 +201,47 @@ export default function App() {
   } | null>(null);
   const [selectedSuggestionId, setSelectedSuggestionId] = useState<string | null>(null);
   const [isRevisionPassMode, setIsRevisionPassMode] = useState(false);
+  const [authoringViewMode, setAuthoringViewMode] = useState<AuthoringViewMode>('normal');
+  const [selectedElementIds, setSelectedElementIds] = useState<string[]>([]);
+  const [isTrackChangesEnabled, setIsTrackChangesEnabled] = useState(false);
+  const [isGoToOpen, setIsGoToOpen] = useState(false);
+  const [isFindOpen, setIsFindOpen] = useState(false);
+  const [characterModalMode, setCharacterModalMode] = useState<CharacterModalMode | null>(null);
+  const [isEmojiSymbolsOpen, setIsEmojiSymbolsOpen] = useState(false);
+  const [historyTick, setHistoryTick] = useState(0);
   const [importText, setImportText] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [gmpQuotaExceeded, setGmpQuotaExceeded] = useState(false);
   const deviceFileInputRef = React.useRef<HTMLInputElement>(null);
+  const elementClipboardRef = React.useRef<ScreenplayElement[]>([]);
+  const textClipboardRef = React.useRef<string>('');
+  const lastTextCursorRef = React.useRef<{
+    elementId: string;
+    start: number;
+    end: number;
+  } | null>(null);
+  const undoStacksRef = React.useRef<
+    Map<
+      string,
+      Array<{
+        elements: ScreenplayElement[];
+        scenes: Scene[];
+        characters: StoryCharacter[];
+        tags: Tag[];
+      }>
+    >
+  >(new Map());
+  const redoStacksRef = React.useRef<
+    Map<
+      string,
+      Array<{
+        elements: ScreenplayElement[];
+        scenes: Scene[];
+        characters: StoryCharacter[];
+        tags: Tag[];
+      }>
+    >
+  >(new Map());
 
   useEffect(() => {
     const handleQuotaExceeded = () => {
@@ -310,7 +354,30 @@ export default function App() {
     return () => clearInterval(interval);
   }, [saveProjectState]);
 
-  // Global Ctrl+S / Ctrl+O / Ctrl+P shortcuts
+  // Track last focused screenplay input cursor selection so Edit menu actions act on exact position
+  useEffect(() => {
+    const captureSelection = () => {
+      const active = document.activeElement;
+      if (
+        (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement) &&
+        focusedElementId
+      ) {
+        const start = active.selectionStart ?? active.value.length;
+        const end = active.selectionEnd ?? active.value.length;
+        lastTextCursorRef.current = { elementId: focusedElementId, start, end };
+      }
+    };
+    document.addEventListener('selectionchange', captureSelection);
+    document.addEventListener('keyup', captureSelection);
+    document.addEventListener('mouseup', captureSelection);
+    return () => {
+      document.removeEventListener('selectionchange', captureSelection);
+      document.removeEventListener('keyup', captureSelection);
+      document.removeEventListener('mouseup', captureSelection);
+    };
+  }, [focusedElementId]);
+
+  // Global Ctrl+S / Ctrl+O / Ctrl+P / Ctrl+F / Ctrl+G shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
@@ -355,6 +422,12 @@ export default function App() {
             );
           }
         }
+      } else if (key === 'f' && !e.shiftKey) {
+        e.preventDefault();
+        setIsFindOpen(true);
+      } else if (key === 'g' && !e.shiftKey) {
+        e.preventDefault();
+        setIsGoToOpen(true);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -373,21 +446,170 @@ export default function App() {
     );
   };
 
+  const pushUndoSnapshot = (proj: StoryProject) => {
+    const stack = undoStacksRef.current.get(proj.id) || [];
+    const nextStack = [
+      ...stack.slice(-39),
+      {
+        elements: proj.elements.map((el) => ({ ...el })),
+        scenes: proj.scenes.map((sc) => ({ ...sc })),
+        characters: proj.characters.map((ch) => ({ ...ch })),
+        tags: proj.tags.map((t) => ({ ...t })),
+      },
+    ];
+    undoStacksRef.current.set(proj.id, nextStack);
+    redoStacksRef.current.set(proj.id, []);
+    setHistoryTick((t) => t + 1);
+  };
+
+  const canUndo = (undoStacksRef.current.get(currentProject.id)?.length || 0) > 0;
+  const canRedo = (redoStacksRef.current.get(currentProject.id)?.length || 0) > 0;
+  void historyTick;
+
+  const handleUndo = () => {
+    const undoStack = undoStacksRef.current.get(currentProject.id) || [];
+    if (undoStack.length === 0) {
+      showToast('Nothing to undo');
+      return;
+    }
+    const previous = undoStack[undoStack.length - 1];
+    undoStacksRef.current.set(currentProject.id, undoStack.slice(0, -1));
+
+    const redoStack = redoStacksRef.current.get(currentProject.id) || [];
+    redoStacksRef.current.set(currentProject.id, [
+      ...redoStack,
+      {
+        elements: currentProject.elements.map((el) => ({ ...el })),
+        scenes: currentProject.scenes.map((sc) => ({ ...sc })),
+        characters: currentProject.characters.map((ch) => ({ ...ch })),
+        tags: currentProject.tags.map((t) => ({ ...t })),
+      },
+    ]);
+
+    updateCurrentProject((proj) => ({
+      ...proj,
+      elements: previous.elements,
+      scenes: previous.scenes,
+      characters: previous.characters,
+      tags: previous.tags,
+      lastModified: 'Just now',
+    }));
+    setHistoryTick((t) => t + 1);
+    showToast('Undid last change');
+  };
+
+  const handleRedo = () => {
+    const redoStack = redoStacksRef.current.get(currentProject.id) || [];
+    if (redoStack.length === 0) {
+      showToast('Nothing to redo');
+      return;
+    }
+    const next = redoStack[redoStack.length - 1];
+    redoStacksRef.current.set(currentProject.id, redoStack.slice(0, -1));
+
+    const undoStack = undoStacksRef.current.get(currentProject.id) || [];
+    undoStacksRef.current.set(currentProject.id, [
+      ...undoStack,
+      {
+        elements: currentProject.elements.map((el) => ({ ...el })),
+        scenes: currentProject.scenes.map((sc) => ({ ...sc })),
+        characters: currentProject.characters.map((ch) => ({ ...ch })),
+        tags: currentProject.tags.map((t) => ({ ...t })),
+      },
+    ]);
+
+    updateCurrentProject((proj) => ({
+      ...proj,
+      elements: next.elements,
+      scenes: next.scenes,
+      characters: next.characters,
+      tags: next.tags,
+      lastModified: 'Just now',
+    }));
+    setHistoryTick((t) => t + 1);
+    showToast('Redid change');
+  };
+
   // Screenplay Element Operations & Revision Tracking
   const handleUpdateElement = (id: string, text: string) => {
-    // 1. If we haven't stored original text for this edit session, cache it
+    // 1. If we haven't stored original text for this edit session, cache it & push Undo
     if (!initialElementTextsRef.current.has(id)) {
       const existingEl = currentProject.elements.find((el) => el.id === id);
       initialElementTextsRef.current.set(id, existingEl ? existingEl.text : '');
+      pushUndoSnapshot(currentProject);
     }
 
     // 2. Immediately update element text & lastEditedAt in state for zero keystroke latency
     const editedIso = new Date().toISOString();
+    const origForTrack = initialElementTextsRef.current.get(id) ?? '';
     updateCurrentProject((proj) => {
       const updatedElements = proj.elements.map((el) =>
         el.id === id ? { ...el, text, lastEditedAt: editedIso } : el
       );
-      return { ...proj, elements: updatedElements };
+
+      if (!isTrackChangesEnabled) {
+        return { ...proj, elements: updatedElements };
+      }
+
+      // Maintain non-destructive tracked change proposal when Track Changes is ON
+      const trackerCollabId = 'track-changes-author';
+      const existingCollabs = proj.collaborators || [];
+      const hasTracker = existingCollabs.some((c) => c.id === trackerCollabId);
+      const nextCollabs = hasTracker
+        ? existingCollabs
+        : [
+            ...existingCollabs,
+            {
+              id: trackerCollabId,
+              name: proj.author || 'Author (Tracked)',
+              role: 'Writer · Tracked Revision',
+              color: '#8b5cf6',
+              isExternal: false,
+              addedAt: new Date().toLocaleDateString(),
+            },
+          ];
+
+      const existingSuggestions = proj.collaboratorSuggestions || [];
+      const activeIdx = existingSuggestions.findIndex(
+        (s) =>
+          s.status === 'pending' &&
+          s.elementId === id &&
+          s.collaboratorId === trackerCollabId
+      );
+      const targetEl = proj.elements.find((el) => el.id === id);
+      const nowTime = new Date().toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+
+      let nextSuggestions: CollaboratorSuggestion[];
+      if (activeIdx >= 0) {
+        nextSuggestions = existingSuggestions.map((s, idx) =>
+          idx === activeIdx ? { ...s, proposedText: text, createdAt: nowTime } : s
+        );
+      } else {
+        const newSug: CollaboratorSuggestion = {
+          id: `tc-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+          collaboratorId: trackerCollabId,
+          sceneId: targetEl?.sceneId,
+          elementId: id,
+          kind: 'edit_text',
+          proposedElementType: targetEl?.type,
+          originalTextSnapshot: origForTrack,
+          proposedText: text,
+          rationale: 'Tracked text edit',
+          status: 'pending',
+          createdAt: nowTime,
+        };
+        nextSuggestions = [newSug, ...existingSuggestions];
+      }
+
+      return {
+        ...proj,
+        elements: updatedElements,
+        collaborators: nextCollabs,
+        collaboratorSuggestions: nextSuggestions,
+      };
     });
 
     // 3. Reset existing debounce timer for this element
@@ -1213,13 +1435,601 @@ export default function App() {
   };
 
   const handleRejectCollaboratorSuggestion = (suggestionId: string) => {
+    const target = (currentProject.collaboratorSuggestions || []).find(
+      (s) => s.id === suggestionId
+    );
+    updateCurrentProject((proj) => {
+      let nextElements = proj.elements;
+      if (
+        target &&
+        target.collaboratorId === 'track-changes-author' &&
+        target.kind === 'edit_text' &&
+        target.elementId &&
+        target.originalTextSnapshot !== undefined
+      ) {
+        nextElements = proj.elements.map((el) =>
+          el.id === target.elementId
+            ? { ...el, text: target.originalTextSnapshot! }
+            : el
+        );
+      }
+      return {
+        ...proj,
+        elements: nextElements,
+        collaboratorSuggestions: (proj.collaboratorSuggestions || []).map((s) =>
+          s.id === suggestionId ? { ...s, status: 'rejected' } : s
+        ),
+      };
+    });
+    showToast(
+      target?.collaboratorId === 'track-changes-author'
+        ? 'Tracked change rejected — original text restored'
+        : 'Proposal dismissed — master script unchanged'
+    );
+  };
+
+  const pendingTrackChanges = React.useMemo(
+    () => (currentProject.collaboratorSuggestions || []).filter((s) => s.status === 'pending'),
+    [currentProject.collaboratorSuggestions]
+  );
+
+  const handleToggleTrackChanges = () => {
+    const next = !isTrackChangesEnabled;
+    setIsTrackChangesEnabled(next);
+    if (next) {
+      setIsRevisionPassMode(true);
+      showToast('Track Changes enabled — edits will be tracked for Accept/Reject');
+    } else {
+      showToast('Track Changes paused');
+    }
+  };
+
+  const getActivePendingChange = () => {
+    if (pendingTrackChanges.length === 0) return undefined;
+    return (
+      pendingTrackChanges.find((s) => s.id === selectedSuggestionId) ||
+      pendingTrackChanges.find((s) => s.elementId === focusedElementId) ||
+      pendingTrackChanges[0]
+    );
+  };
+
+  const handleAcceptActiveChange = () => {
+    const active = getActivePendingChange();
+    if (!active) {
+      showToast('No pending tracked changes to accept');
+      return;
+    }
+    const remaining = pendingTrackChanges.filter((s) => s.id !== active.id);
+    handleAcceptCollaboratorSuggestion(active.id);
+    setSelectedSuggestionId(remaining[0]?.id || null);
+  };
+
+  const handleRejectActiveChange = () => {
+    const active = getActivePendingChange();
+    if (!active) {
+      showToast('No pending tracked changes to reject');
+      return;
+    }
+    const remaining = pendingTrackChanges.filter((s) => s.id !== active.id);
+    handleRejectCollaboratorSuggestion(active.id);
+    setSelectedSuggestionId(remaining[0]?.id || null);
+  };
+
+  const handleNavigateChange = (direction: -1 | 1) => {
+    if (pendingTrackChanges.length === 0) {
+      showToast('No pending tracked changes in this document');
+      return;
+    }
+    const currentIdx = pendingTrackChanges.findIndex((s) => s.id === selectedSuggestionId);
+    const nextIdx =
+      currentIdx < 0
+        ? direction > 0
+          ? 0
+          : pendingTrackChanges.length - 1
+        : (currentIdx + direction + pendingTrackChanges.length) %
+          pendingTrackChanges.length;
+
+    const target = pendingTrackChanges[nextIdx];
+    setSelectedSuggestionId(target.id);
+    if (target.sceneId) setSelectedSceneId(target.sceneId);
+    if (target.elementId) setFocusedElementId(target.elementId);
+    setActiveWorkspace('authoring');
+    showToast(
+      `Change ${nextIdx + 1} of ${pendingTrackChanges.length}: ${target.kind.replace('_', ' ')}`
+    );
+  };
+
+  const handleSelectAllElements = () => {
+    if (currentProject.elements.length === 0) return;
+    setActiveWorkspace('authoring');
+    setSelectedElementIds(currentProject.elements.map((el) => el.id));
+    showToast(`Selected all ${currentProject.elements.length} screenplay elements`);
+  };
+
+  const handleSelectSceneElements = () => {
+    const targetSceneId =
+      selectedSceneId ||
+      currentProject.elements.find((e) => e.id === focusedElementId)?.sceneId ||
+      currentProject.scenes[0]?.id;
+    if (!targetSceneId) return;
+    const matched = currentProject.elements.filter((el) => el.sceneId === targetSceneId);
+    if (matched.length === 0) {
+      showToast('No elements found in active scene');
+      return;
+    }
+    setActiveWorkspace('authoring');
+    setSelectedSceneId(targetSceneId);
+    setSelectedElementIds(matched.map((el) => el.id));
+    setFocusedElementId(matched[0].id);
+    const sceneObj = currentProject.scenes.find((s) => s.id === targetSceneId);
+    showToast(
+      `Selected ${matched.length} element${matched.length === 1 ? '' : 's'} in Scene ${
+        sceneObj?.sceneNumber || ''
+      }`
+    );
+  };
+
+  const getTargetedElementsForClipboard = (): ScreenplayElement[] => {
+    if (selectedElementIds.length > 0) {
+      const idSet = new Set(selectedElementIds);
+      return currentProject.elements.filter((el) => idSet.has(el.id));
+    }
+    if (focusedElementId) {
+      const el = currentProject.elements.find((item) => item.id === focusedElementId);
+      return el ? [el] : [];
+    }
+    return currentProject.elements[0] ? [currentProject.elements[0]] : [];
+  };
+
+  const handleCopySelection = () => {
+    const cursor = lastTextCursorRef.current;
+    if (cursor && cursor.end > cursor.start && selectedElementIds.length === 0) {
+      const el = currentProject.elements.find((item) => item.id === cursor.elementId);
+      if (el) {
+        const slice = el.text.slice(cursor.start, cursor.end);
+        textClipboardRef.current = slice;
+        elementClipboardRef.current = [];
+        void navigator.clipboard?.writeText(slice).catch(() => {});
+        showToast('Copied selected text');
+        return;
+      }
+    }
+
+    const targets = getTargetedElementsForClipboard();
+    if (targets.length === 0) return;
+    elementClipboardRef.current = targets.map((el) => ({ ...el }));
+    const plain = targets.map((el) => el.text).join('\n\n');
+    textClipboardRef.current = plain;
+    void navigator.clipboard?.writeText(plain).catch(() => {});
+    showToast(`Copied ${targets.length} element${targets.length === 1 ? '' : 's'}`);
+  };
+
+  const handleDeleteSelection = () => {
+    const cursor = lastTextCursorRef.current;
+    if (cursor && cursor.end > cursor.start && selectedElementIds.length === 0) {
+      const el = currentProject.elements.find((item) => item.id === cursor.elementId);
+      if (el) {
+        pushUndoSnapshot(currentProject);
+        const nextText = el.text.slice(0, cursor.start) + el.text.slice(cursor.end);
+        handleUpdateElement(el.id, nextText);
+        lastTextCursorRef.current = { ...cursor, end: cursor.start };
+        showToast('Deleted selected text');
+        return;
+      }
+    }
+
+    const targets = getTargetedElementsForClipboard();
+    if (targets.length === 0) return;
+    if (currentProject.elements.length <= targets.length) {
+      pushUndoSnapshot(currentProject);
+      const fallbackEl: ScreenplayElement = {
+        ...currentProject.elements[0],
+        text: '',
+      };
+      updateCurrentProject((proj) => ({ ...proj, elements: [fallbackEl] }));
+      setSelectedElementIds([]);
+      setFocusedElementId(fallbackEl.id);
+      showToast('Cleared script content');
+      return;
+    }
+
+    pushUndoSnapshot(currentProject);
+    const deleteIds = new Set(targets.map((t) => t.id));
+    const remaining = currentProject.elements.filter((el) => !deleteIds.has(el.id));
     updateCurrentProject((proj) => ({
       ...proj,
-      collaboratorSuggestions: (proj.collaboratorSuggestions || []).map((s) =>
-        s.id === suggestionId ? { ...s, status: 'rejected' } : s
-      ),
+      elements: remaining,
+      lastModified: 'Just now',
     }));
-    showToast('Proposal dismissed — master script unchanged');
+    setSelectedElementIds([]);
+    setFocusedElementId(remaining[0]?.id || null);
+    showToast(`Deleted ${targets.length} element${targets.length === 1 ? '' : 's'}`);
+  };
+
+  const handleCutSelection = () => {
+    handleCopySelection();
+    handleDeleteSelection();
+  };
+
+  const handlePasteSelection = async () => {
+    let clipboardText = textClipboardRef.current;
+    try {
+      if (navigator.clipboard?.readText) {
+        const read = await navigator.clipboard.readText();
+        if (read) clipboardText = read;
+      }
+    } catch {
+      // Fallback to internal clipboard ref when browser blocks async clipboard read
+    }
+
+    if (
+      elementClipboardRef.current.length > 0 &&
+      (!clipboardText || clipboardText === textClipboardRef.current)
+    ) {
+      pushUndoSnapshot(currentProject);
+      const anchorId =
+        focusedElementId ||
+        currentProject.elements[currentProject.elements.length - 1]?.id;
+      const anchorIdx = currentProject.elements.findIndex((el) => el.id === anchorId);
+      const insertAt = anchorIdx >= 0 ? anchorIdx + 1 : currentProject.elements.length;
+      const inheritedScene =
+        currentProject.elements[Math.max(0, anchorIdx)]?.sceneId ||
+        selectedSceneId ||
+        currentProject.scenes[0]?.id;
+
+      const clones = elementClipboardRef.current.map((src, i) => ({
+        ...src,
+        id: `el-paste-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 5)}`,
+        sceneId: src.sceneId || inheritedScene,
+        lastEditedAt: new Date().toISOString(),
+      }));
+
+      updateCurrentProject((proj) => {
+        const nextElements = [...proj.elements];
+        nextElements.splice(insertAt, 0, ...clones);
+        return { ...proj, elements: nextElements, lastModified: 'Just now' };
+      });
+      setSelectedElementIds(clones.map((c) => c.id));
+      setFocusedElementId(clones[clones.length - 1]?.id || null);
+      showToast(`Pasted ${clones.length} element${clones.length === 1 ? '' : 's'}`);
+      return;
+    }
+
+    if (!clipboardText) {
+      showToast('Clipboard is empty');
+      return;
+    }
+
+    const targetId =
+      lastTextCursorRef.current?.elementId ||
+      focusedElementId ||
+      currentProject.elements[0]?.id;
+    const targetEl = currentProject.elements.find((el) => el.id === targetId);
+    if (!targetEl) return;
+
+    pushUndoSnapshot(currentProject);
+    const start =
+      lastTextCursorRef.current?.elementId === targetId
+        ? lastTextCursorRef.current.start
+        : targetEl.text.length;
+    const end =
+      lastTextCursorRef.current?.elementId === targetId
+        ? lastTextCursorRef.current.end
+        : targetEl.text.length;
+    const nextText =
+      targetEl.text.slice(0, start) + clipboardText + targetEl.text.slice(end);
+    handleUpdateElement(targetId, nextText);
+    const nextPos = start + clipboardText.length;
+    lastTextCursorRef.current = { elementId: targetId, start: nextPos, end: nextPos };
+    showToast('Pasted text');
+  };
+
+  const handleInsertEmojiSymbol = (glyph: string) => {
+    void navigator.clipboard?.writeText(glyph).catch(() => {});
+    const targetId =
+      lastTextCursorRef.current?.elementId ||
+      focusedElementId ||
+      currentProject.elements[0]?.id;
+    const targetEl = currentProject.elements.find((el) => el.id === targetId);
+    if (!targetEl) {
+      showToast(`Copied "${glyph}" to clipboard`);
+      return;
+    }
+
+    pushUndoSnapshot(currentProject);
+    const start =
+      lastTextCursorRef.current?.elementId === targetId
+        ? lastTextCursorRef.current.start
+        : targetEl.text.length;
+    const end =
+      lastTextCursorRef.current?.elementId === targetId
+        ? lastTextCursorRef.current.end
+        : targetEl.text.length;
+    const nextText = targetEl.text.slice(0, start) + glyph + targetEl.text.slice(end);
+    handleUpdateElement(targetId, nextText);
+    const nextPos = start + glyph.length;
+    lastTextCursorRef.current = { elementId: targetId, start: nextPos, end: nextPos };
+    setFocusedElementId(targetId);
+  };
+
+  const handleReplaceAllInScript = (
+    findText: string,
+    replaceText: string,
+    caseSensitive: boolean,
+    wholeWord: boolean
+  ): number => {
+    if (!findText) return 0;
+    const escaped = findText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(
+      wholeWord ? `\\b${escaped}\\b` : escaped,
+      caseSensitive ? 'g' : 'gi'
+    );
+    let touchedCount = 0;
+    pushUndoSnapshot(currentProject);
+    updateCurrentProject((proj) => {
+      const nextElements = proj.elements.map((el) => {
+        regex.lastIndex = 0;
+        if (!regex.test(el.text)) return el;
+        touchedCount += 1;
+        regex.lastIndex = 0;
+        return {
+          ...el,
+          text: el.text.replace(regex, replaceText),
+          lastEditedAt: new Date().toISOString(),
+        };
+      });
+      return { ...proj, elements: nextElements, lastModified: 'Just now' };
+    });
+    return touchedCount;
+  };
+
+  const handleRenameCharacterGlobal = (oldName: string, newName: string) => {
+    const oldUpper = oldName.trim().toUpperCase();
+    const newUpper = newName.trim().toUpperCase();
+    if (!oldUpper || !newUpper || oldUpper === newUpper) return;
+
+    pushUndoSnapshot(currentProject);
+    updateCurrentProject((proj) => {
+      const updatedElements = proj.elements.map((el) => {
+        let next = el;
+        if (el.type === 'CHARACTER') {
+          const base = el.text.replace(/\s*\([^)]*\)$/, '').trim().toUpperCase();
+          if (base === oldUpper) {
+            const suffix = el.text.match(/\s*\([^)]*\)$/)?.[0] || '';
+            next = { ...el, text: `${newUpper}${suffix}` };
+          }
+        }
+        if ((el.character || '').trim().toUpperCase() === oldUpper) {
+          next = { ...next, character: newUpper };
+        }
+        return next;
+      });
+
+      const updatedScenes = proj.scenes.map((sc) => ({
+        ...sc,
+        characters: Array.from(
+          new Set(
+            sc.characters.map((c) =>
+              c.trim().toUpperCase() === oldUpper ? newUpper : c
+            )
+          )
+        ),
+      }));
+
+      const updatedChars = proj.characters.map((c) =>
+        c.name.trim().toUpperCase() === oldUpper ? { ...c, name: newUpper } : c
+      );
+
+      const updatedTags = proj.tags.map((t) =>
+        t.category === 'character' && t.name.trim().toUpperCase() === oldUpper
+          ? { ...t, name: newUpper }
+          : t
+      );
+
+      const updatedBreakdowns = (proj.characterBreakdowns || []).map((cb) =>
+        cb.characterName.trim().toUpperCase() === oldUpper
+          ? { ...cb, characterName: newUpper }
+          : cb
+      );
+
+      const updatedBios = (proj.projectBible?.characterBios || []).map((bio) =>
+        bio.characterName.trim().toUpperCase() === oldUpper
+          ? { ...bio, characterName: newUpper }
+          : bio
+      );
+
+      return {
+        ...proj,
+        elements: updatedElements,
+        scenes: updatedScenes,
+        characters: updatedChars,
+        tags: updatedTags,
+        characterBreakdowns: updatedBreakdowns,
+        projectBible: proj.projectBible
+          ? { ...proj.projectBible, characterBios: updatedBios }
+          : undefined,
+        lastModified: 'Just now',
+      };
+    });
+    showToast(`Renamed "${oldUpper}" to "${newUpper}" across script`);
+  };
+
+  const handleAddCharacterGlobal = (payload: {
+    name: string;
+    role: 'Lead' | 'Supporting' | 'Antagonist' | 'Featured' | 'Ensemble';
+    color: string;
+    bio: string;
+    insertCueInScript: boolean;
+  }) => {
+    const cleanName = payload.name.trim().toUpperCase();
+    if (!cleanName) return;
+
+    pushUndoSnapshot(currentProject);
+    updateCurrentProject((proj) => {
+      const exists = proj.characters.some(
+        (c) => c.name.trim().toUpperCase() === cleanName
+      );
+      const nextCharacters = exists
+        ? proj.characters
+        : [
+            ...proj.characters,
+            {
+              name: cleanName,
+              color: payload.color,
+              scenesCount: selectedSceneId ? 1 : 0,
+              speakingLines: payload.insertCueInScript ? 1 : 0,
+            },
+          ];
+
+      const existingBios = proj.projectBible?.characterBios || [];
+      const hasBio = existingBios.some(
+        (b) => b.characterName.trim().toUpperCase() === cleanName
+      );
+      const nextBios = hasBio
+        ? existingBios
+        : [
+            ...existingBios,
+            {
+              id: `bio-${Date.now()}`,
+              characterName: cleanName,
+              roleType: payload.role || 'Supporting',
+              loglineSummary: payload.bio || 'Added from Edit menu.',
+              backstory: payload.bio || '',
+              arcStartToEnd: '',
+              coreFlawOrTension: '',
+            },
+          ];
+
+      let nextElements = proj.elements;
+      if (payload.insertCueInScript) {
+        const anchorId =
+          focusedElementId || proj.elements[proj.elements.length - 1]?.id;
+        const idx = proj.elements.findIndex((el) => el.id === anchorId);
+        const sceneId =
+          proj.elements[Math.max(0, idx)]?.sceneId ||
+          selectedSceneId ||
+          proj.scenes[0]?.id;
+        const newCue: ScreenplayElement = {
+          id: `el-char-${Date.now()}`,
+          type: 'CHARACTER',
+          text: cleanName,
+          sceneId,
+          lastEditedAt: new Date().toISOString(),
+        };
+        nextElements = [...proj.elements];
+        nextElements.splice(idx >= 0 ? idx + 1 : nextElements.length, 0, newCue);
+      }
+
+      const prevBible = proj.projectBible || {
+        logline: '',
+        genre: 'Drama',
+        formatLabel: 'Feature Screenplay',
+        targetRuntime: '110 min',
+        themes: [],
+        pitchSummary: '',
+        characterBios: [],
+        pitchDocs: [],
+        researchNotes: [],
+      };
+
+      return {
+        ...proj,
+        characters: nextCharacters,
+        elements: nextElements,
+        projectBible: {
+          ...prevBible,
+          characterBios: nextBios,
+        },
+        lastModified: 'Just now',
+      };
+    });
+    showToast(`Added character "${cleanName}"`);
+  };
+
+  const handleEditCharacterGlobal = (payload: {
+    originalName: string;
+    name: string;
+    role: 'Lead' | 'Supporting' | 'Antagonist' | 'Featured' | 'Ensemble';
+    color: string;
+    bio: string;
+  }) => {
+    const oldUpper = payload.originalName.trim().toUpperCase();
+    const newUpper = payload.name.trim().toUpperCase();
+    if (!newUpper) return;
+
+    if (oldUpper && oldUpper !== newUpper) {
+      handleRenameCharacterGlobal(oldUpper, newUpper);
+    }
+
+    updateCurrentProject((proj) => {
+      const nextCharacters = proj.characters.map((c) =>
+        c.name.trim().toUpperCase() === newUpper
+          ? { ...c, color: payload.color }
+          : c
+      );
+      const existingBios = proj.projectBible?.characterBios || [];
+      const hasBio = existingBios.some(
+        (b) => b.characterName.trim().toUpperCase() === newUpper
+      );
+      const nextBios = hasBio
+        ? existingBios.map((b) =>
+            b.characterName.trim().toUpperCase() === newUpper
+              ? { ...b, roleType: payload.role, loglineSummary: payload.bio }
+              : b
+          )
+        : [
+            ...existingBios,
+            {
+              id: `bio-${Date.now()}`,
+              characterName: newUpper,
+              roleType: payload.role,
+              loglineSummary: payload.bio,
+              backstory: payload.bio,
+              arcStartToEnd: '',
+              coreFlawOrTension: '',
+            },
+          ];
+
+      const prevBible = proj.projectBible || {
+        logline: '',
+        genre: 'Drama',
+        formatLabel: 'Feature Screenplay',
+        targetRuntime: '110 min',
+        themes: [],
+        pitchSummary: '',
+        characterBios: [],
+        pitchDocs: [],
+        researchNotes: [],
+      };
+
+      return {
+        ...proj,
+        characters: nextCharacters,
+        projectBible: {
+          ...prevBible,
+          characterBios: nextBios,
+        },
+        lastModified: 'Just now',
+      };
+    });
+    showToast(`Updated character "${newUpper}"`);
+  };
+
+  const handleChangeAuthoringViewMode = (mode: AuthoringViewMode) => {
+    setAuthoringViewMode(mode);
+    if (mode === 'simple') {
+      setIsLeftPanelCollapsed(true);
+      setIsRightPanelCollapsed(true);
+      showToast('Switched to Simple View (distraction-free)');
+    } else if (mode === 'page') {
+      setIsLeftPanelCollapsed(false);
+      setIsRightPanelCollapsed(false);
+      showToast('Switched to Page View (paginated sheets)');
+    } else {
+      setIsLeftPanelCollapsed(false);
+      setIsRightPanelCollapsed(false);
+      showToast('Switched to Normal View');
+    }
   };
 
   const handleReopenCollaboratorSuggestion = (suggestionId: string) => {
@@ -2093,6 +2903,31 @@ export default function App() {
           setHelpInitialToolId(toolId);
           setIsHelpGuideOpen(true);
         }}
+        onSelectAll={handleSelectAllElements}
+        onSelectScene={handleSelectSceneElements}
+        onCut={handleCutSelection}
+        onCopy={handleCopySelection}
+        onPaste={() => void handlePasteSelection()}
+        onDeleteSelection={handleDeleteSelection}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onOpenGoTo={() => setIsGoToOpen(true)}
+        onOpenFind={() => setIsFindOpen(true)}
+        onRenameCharacter={() => setCharacterModalMode('rename')}
+        onAddCharacter={() => setCharacterModalMode('add')}
+        onEditCharacter={() => setCharacterModalMode('edit')}
+        isTrackChangesEnabled={isTrackChangesEnabled}
+        onToggleTrackChanges={handleToggleTrackChanges}
+        onAcceptChange={handleAcceptActiveChange}
+        onRejectChange={handleRejectActiveChange}
+        onPreviousChange={() => handleNavigateChange(-1)}
+        onNextChange={() => handleNavigateChange(1)}
+        pendingTrackChangesCount={pendingTrackChanges.length}
+        onOpenEmojiSymbols={() => setIsEmojiSymbolsOpen(true)}
+        authoringViewMode={authoringViewMode}
+        onChangeAuthoringViewMode={handleChangeAuthoringViewMode}
       />
 
       {/* Formatting Ribbon Toolbar (Authoring Workspace) */}
@@ -2245,6 +3080,9 @@ export default function App() {
                       setActiveWorkspace('collaboration');
                     }}
                     focusedElementId={focusedElementId}
+                    selectedElementIds={selectedElementIds}
+                    onClearElementSelection={() => setSelectedElementIds([])}
+                    authoringViewMode={authoringViewMode}
                     onInspectContinuityElement={(elId) => {
                       setFocusedElementId(elId);
                       setIsRightPanelCollapsed(false);
@@ -2673,6 +3511,70 @@ export default function App() {
           project={currentProject}
           onUpdateTypography={handleUpdateProjectTypography}
           onClose={() => setIsPreferencesOpen(false)}
+        />
+      )}
+
+      {/* Edit Menu Dialogs: Go To, Find & Replace, Character Quick Edit, Emoji & Symbols */}
+      {isGoToOpen && (
+        <GoToModal
+          scenes={currentProject.scenes}
+          elements={currentProject.elements}
+          onGoToScene={(sceneId) => {
+            setSelectedSceneId(sceneId);
+            const firstSceneEl = currentProject.elements.find((e) => e.sceneId === sceneId);
+            if (firstSceneEl) setFocusedElementId(firstSceneEl.id);
+            setActiveWorkspace('authoring');
+          }}
+          onGoToElement={(elementId) => {
+            const matched = currentProject.elements.find((e) => e.id === elementId);
+            handleJumpToElement(matched?.sceneId, elementId);
+          }}
+          onClose={() => setIsGoToOpen(false)}
+        />
+      )}
+
+      {isFindOpen && (
+        <FindReplaceModal
+          elements={currentProject.elements}
+          onJumpToElement={(elementId) => {
+            const matched = currentProject.elements.find((e) => e.id === elementId);
+            handleJumpToElement(matched?.sceneId, elementId);
+          }}
+          onReplaceInElement={(elementId, nextText) => {
+            pushUndoSnapshot(currentProject);
+            handleUpdateElement(elementId, nextText);
+          }}
+          onReplaceAll={handleReplaceAllInScript}
+          onNotify={showToast}
+          onClose={() => setIsFindOpen(false)}
+        />
+      )}
+
+      {characterModalMode && (
+        <CharacterActionModal
+          mode={characterModalMode}
+          characters={currentProject.characters}
+          characterBios={currentProject.projectBible?.characterBios || []}
+          initialCharacterName={
+            activeTargetElement?.type === 'CHARACTER'
+              ? activeTargetElement.text.replace(/\s*\([^)]*\)$/, '').trim()
+              : activeTargetElement?.character
+          }
+          onRenameCharacter={handleRenameCharacterGlobal}
+          onAddCharacter={handleAddCharacterGlobal}
+          onEditCharacter={handleEditCharacterGlobal}
+          onOpenCharactersWorkspace={() => {
+            setCharactersInitialSubView('details');
+            setActiveWorkspace('characters');
+          }}
+          onClose={() => setCharacterModalMode(null)}
+        />
+      )}
+
+      {isEmojiSymbolsOpen && (
+        <EmojiSymbolsModal
+          onInsertSymbol={handleInsertEmojiSymbol}
+          onClose={() => setIsEmojiSymbolsOpen(false)}
         />
       )}
 

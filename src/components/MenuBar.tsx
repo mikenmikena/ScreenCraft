@@ -33,13 +33,29 @@ import {
   Theater,
   Tv,
   ChevronRight,
-  ListTree,
-  GitPullRequest,
   Settings,
+  Scissors,
+  Copy,
+  Clipboard,
+  Trash2,
+  Navigation,
+  UserPlus,
+  UserCog,
+  Edit3,
+  Check,
+  X,
+  ChevronLeft,
+  Smile,
+  History,
+  CheckSquare,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import { ActiveWorkspace, ElementType } from '../types/story';
 import { DocumentTemplateKind } from '../utils/projectTemplates';
 import { HelpSectionCategory } from './HelpGuideModal';
+
+export type AuthoringViewMode = 'normal' | 'simple' | 'page';
 
 interface MenuBarProps {
   activeWorkspace: ActiveWorkspace;
@@ -69,6 +85,33 @@ interface MenuBarProps {
   onOpenContinuityCheck?: () => void;
   continuityAlertCount?: number;
   onOpenHelpGuide?: (category?: HelpSectionCategory, toolId?: string) => void;
+  // Edit Menu Actions
+  onSelectAll?: () => void;
+  onSelectScene?: () => void;
+  onCut?: () => void;
+  onCopy?: () => void;
+  onPaste?: () => void;
+  onDeleteSelection?: () => void;
+  onUndo?: () => void;
+  onRedo?: () => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
+  onOpenGoTo?: () => void;
+  onOpenFind?: () => void;
+  onRenameCharacter?: () => void;
+  onAddCharacter?: () => void;
+  onEditCharacter?: () => void;
+  isTrackChangesEnabled?: boolean;
+  onToggleTrackChanges?: () => void;
+  onAcceptChange?: () => void;
+  onRejectChange?: () => void;
+  onPreviousChange?: () => void;
+  onNextChange?: () => void;
+  pendingTrackChangesCount?: number;
+  onOpenEmojiSymbols?: () => void;
+  // View Menu Actions
+  authoringViewMode?: AuthoringViewMode;
+  onChangeAuthoringViewMode?: (mode: AuthoringViewMode) => void;
 }
 
 export const MenuBar: React.FC<MenuBarProps> = ({
@@ -99,6 +142,31 @@ export const MenuBar: React.FC<MenuBarProps> = ({
   onOpenContinuityCheck,
   continuityAlertCount = 0,
   onOpenHelpGuide,
+  onSelectAll,
+  onSelectScene,
+  onCut,
+  onCopy,
+  onPaste,
+  onDeleteSelection,
+  onUndo,
+  onRedo,
+  canUndo = false,
+  canRedo = false,
+  onOpenGoTo,
+  onOpenFind,
+  onRenameCharacter,
+  onAddCharacter,
+  onEditCharacter,
+  isTrackChangesEnabled = false,
+  onToggleTrackChanges,
+  onAcceptChange,
+  onRejectChange,
+  onPreviousChange,
+  onNextChange,
+  pendingTrackChangesCount = 0,
+  onOpenEmojiSymbols,
+  authoringViewMode = 'normal',
+  onChangeAuthoringViewMode,
 }) => {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [fileSubmenu, setFileSubmenu] = useState<null | 'new' | 'export'>(null);
@@ -442,28 +510,279 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             Edit
           </button>
           {openMenu === 'edit' && (
-            <div className="absolute left-0 top-full mt-1 w-52 bg-[#222222] border border-[#444444] rounded shadow-2xl py-1 z-50 text-gray-200">
+            <div className="absolute left-0 top-full mt-1 w-64 max-h-[82vh] overflow-y-auto bg-[#222222] border border-[#444444] rounded shadow-2xl py-1 z-50 text-gray-200">
+              {/* Selection Section */}
               <button
-                onClick={() => setOpenMenu(null)}
+                type="button"
+                onClick={() => {
+                  onSelectAll?.();
+                  closeAllMenus();
+                }}
                 className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center justify-between text-xs"
               >
-                <span className="flex items-center space-x-2"><RotateCcw className="w-3.5 h-3.5" /><span>Undo</span></span>
+                <span className="flex items-center space-x-2">
+                  <CheckSquare className="w-3.5 h-3.5 text-sky-400" />
+                  <span>Select All</span>
+                </span>
+                <span className="text-[10px] text-gray-400">Ctrl+A</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onSelectScene?.();
+                  closeAllMenus();
+                }}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs"
+              >
+                <Film className="w-3.5 h-3.5 text-amber-400" />
+                <span>Select Scene</span>
+              </button>
+
+              <div className="h-px bg-[#333333] my-1"></div>
+
+              {/* Clipboard, History, Navigation, Find & Characters Section */}
+              <button
+                type="button"
+                onClick={() => {
+                  onCut?.();
+                  closeAllMenus();
+                }}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center justify-between text-xs"
+              >
+                <span className="flex items-center space-x-2">
+                  <Scissors className="w-3.5 h-3.5" />
+                  <span>Cut</span>
+                </span>
+                <span className="text-[10px] text-gray-400">Ctrl+X</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onCopy?.();
+                  closeAllMenus();
+                }}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center justify-between text-xs"
+              >
+                <span className="flex items-center space-x-2">
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Copy</span>
+                </span>
+                <span className="text-[10px] text-gray-400">Ctrl+C</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onPaste?.();
+                  closeAllMenus();
+                }}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center justify-between text-xs"
+              >
+                <span className="flex items-center space-x-2">
+                  <Clipboard className="w-3.5 h-3.5" />
+                  <span>Paste</span>
+                </span>
+                <span className="text-[10px] text-gray-400">Ctrl+V</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onDeleteSelection?.();
+                  closeAllMenus();
+                }}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center justify-between text-xs"
+              >
+                <span className="flex items-center space-x-2">
+                  <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Delete</span>
+                </span>
+                <span className="text-[10px] text-gray-400">Del</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onUndo?.();
+                  closeAllMenus();
+                }}
+                disabled={!canUndo}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white disabled:opacity-40 flex items-center justify-between text-xs"
+              >
+                <span className="flex items-center space-x-2">
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Undo</span>
+                </span>
                 <span className="text-[10px] text-gray-400">Ctrl+Z</span>
               </button>
               <button
-                onClick={() => setOpenMenu(null)}
-                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center justify-between text-xs"
+                type="button"
+                onClick={() => {
+                  onRedo?.();
+                  closeAllMenus();
+                }}
+                disabled={!canRedo}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white disabled:opacity-40 flex items-center justify-between text-xs"
               >
-                <span className="flex items-center space-x-2"><RotateCw className="w-3.5 h-3.5" /><span>Redo</span></span>
+                <span className="flex items-center space-x-2">
+                  <RotateCw className="w-3.5 h-3.5" />
+                  <span>Redo</span>
+                </span>
                 <span className="text-[10px] text-gray-400">Ctrl+Y</span>
               </button>
-              <div className="h-px bg-[#333333] my-1"></div>
               <button
-                onClick={() => setOpenMenu(null)}
+                type="button"
+                onClick={() => {
+                  onOpenGoTo?.();
+                  closeAllMenus();
+                }}
                 className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center justify-between text-xs"
               >
-                <span className="flex items-center space-x-2"><Search className="w-3.5 h-3.5" /><span>Find & Replace</span></span>
+                <span className="flex items-center space-x-2">
+                  <Navigation className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Go To...</span>
+                </span>
+                <span className="text-[10px] text-gray-400">Ctrl+G</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onOpenFind?.();
+                  closeAllMenus();
+                }}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center justify-between text-xs"
+              >
+                <span className="flex items-center space-x-2">
+                  <Search className="w-3.5 h-3.5 text-amber-300" />
+                  <span>Find &amp; Replace...</span>
+                </span>
                 <span className="text-[10px] text-gray-400">Ctrl+F</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onRenameCharacter?.();
+                  closeAllMenus();
+                }}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs"
+              >
+                <Edit3 className="w-3.5 h-3.5 text-amber-400" />
+                <span>Rename Character...</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onAddCharacter?.();
+                  closeAllMenus();
+                }}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs"
+              >
+                <UserPlus className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Add Character...</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onEditCharacter?.();
+                  closeAllMenus();
+                }}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs"
+              >
+                <UserCog className="w-3.5 h-3.5 text-sky-400" />
+                <span>Edit Character...</span>
+              </button>
+
+              <div className="h-px bg-[#333333] my-1"></div>
+
+              {/* Track Changes Section */}
+              <button
+                type="button"
+                onClick={() => {
+                  onToggleTrackChanges?.();
+                  closeAllMenus();
+                }}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center justify-between text-xs"
+              >
+                <span className="flex items-center space-x-2">
+                  <History className="w-3.5 h-3.5 text-violet-400" />
+                  <span>Track Changes</span>
+                </span>
+                <span
+                  className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                    isTrackChangesEnabled
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                      : 'text-gray-500'
+                  }`}
+                >
+                  {isTrackChangesEnabled ? 'ON' : 'OFF'}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onAcceptChange?.();
+                  closeAllMenus();
+                }}
+                disabled={pendingTrackChangesCount === 0}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white disabled:opacity-40 flex items-center justify-between text-xs"
+              >
+                <span className="flex items-center space-x-2">
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Accept</span>
+                </span>
+                {pendingTrackChangesCount > 0 && (
+                  <span className="text-[10px] font-mono text-gray-400">
+                    {pendingTrackChangesCount}
+                  </span>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onRejectChange?.();
+                  closeAllMenus();
+                }}
+                disabled={pendingTrackChangesCount === 0}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white disabled:opacity-40 flex items-center space-x-2 text-xs"
+              >
+                <X className="w-3.5 h-3.5 text-rose-400" />
+                <span>Reject</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onPreviousChange?.();
+                  closeAllMenus();
+                }}
+                disabled={pendingTrackChangesCount === 0}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white disabled:opacity-40 flex items-center space-x-2 text-xs"
+              >
+                <ChevronLeft className="w-3.5 h-3.5 text-amber-300" />
+                <span>Previous Change</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onNextChange?.();
+                  closeAllMenus();
+                }}
+                disabled={pendingTrackChangesCount === 0}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white disabled:opacity-40 flex items-center space-x-2 text-xs"
+              >
+                <ChevronRight className="w-3.5 h-3.5 text-amber-300" />
+                <span>Next Change</span>
+              </button>
+
+              <div className="h-px bg-[#333333] my-1"></div>
+
+              {/* Emoji & Symbols Section */}
+              <button
+                type="button"
+                onClick={() => {
+                  onOpenEmojiSymbols?.();
+                  closeAllMenus();
+                }}
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs"
+              >
+                <Smile className="w-3.5 h-3.5 text-amber-300" />
+                <span>Emoji &amp; Symbols...</span>
               </button>
             </div>
           )}
@@ -480,92 +799,58 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             View
           </button>
           {openMenu === 'view' && (
-            <div className="absolute left-0 top-full mt-1 w-60 bg-[#222222] border border-[#444444] rounded shadow-2xl py-1 z-50 text-gray-200">
+            <div className="absolute left-0 top-full mt-1 w-52 bg-[#222222] border border-[#444444] rounded shadow-2xl py-1 z-50 text-gray-200">
               <button
+                type="button"
                 onClick={() => {
+                  onChangeAuthoringViewMode?.('normal');
                   onSelectWorkspace('authoring');
                   setOpenMenu(null);
                 }}
-                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs"
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center justify-between text-xs"
               >
-                <Layout className="w-3.5 h-3.5" />
-                <span>Authoring Workspace</span>
+                <span className="flex items-center space-x-2">
+                  <Layout className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Normal View</span>
+                </span>
+                {authoringViewMode === 'normal' && (
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                )}
               </button>
               <button
+                type="button"
                 onClick={() => {
-                  onSelectWorkspace('characters');
+                  onChangeAuthoringViewMode?.('simple');
+                  onSelectWorkspace('authoring');
                   setOpenMenu(null);
                 }}
-                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs"
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center justify-between text-xs"
               >
-                <Users className="w-3.5 h-3.5 text-amber-400" />
-                <span>Characters &amp; Connections</span>
+                <span className="flex items-center space-x-2">
+                  <Minimize2 className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Simple View</span>
+                </span>
+                {authoringViewMode === 'simple' && (
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                )}
               </button>
               <button
+                type="button"
                 onClick={() => {
-                  onSelectWorkspace('outline');
+                  onChangeAuthoringViewMode?.('page');
+                  onSelectWorkspace('authoring');
                   setOpenMenu(null);
                 }}
-                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs"
+                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center justify-between text-xs"
               >
-                <ListTree className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Outline &amp; Beat Board</span>
+                <span className="flex items-center space-x-2">
+                  <Maximize2 className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Page View</span>
+                </span>
+                {authoringViewMode === 'page' && (
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                )}
               </button>
-              <button
-                onClick={() => {
-                  onSelectWorkspace('production');
-                  setOpenMenu(null);
-                }}
-                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs"
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Production Workspace</span>
-              </button>
-              <button
-                onClick={() => {
-                  onSelectWorkspace('storyboard');
-                  setOpenMenu(null);
-                }}
-                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs"
-              >
-                <Camera className="w-3.5 h-3.5 text-amber-400" />
-                <span>Storyboarding Workspace</span>
-              </button>
-              <button
-                onClick={() => {
-                  onSelectWorkspace('collaboration');
-                  setOpenMenu(null);
-                }}
-                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs"
-              >
-                <GitPullRequest className="w-3.5 h-3.5 text-violet-400" />
-                <span>Collaboration &amp; Redlines</span>
-              </button>
-              <button
-                onClick={() => {
-                  onSelectWorkspace('teleprompter');
-                  setOpenMenu(null);
-                }}
-                className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs"
-              >
-                <MonitorPlay className="w-3.5 h-3.5 text-[#ff7700]" />
-                <span>Teleprompter Workspace</span>
-              </button>
-              {onOpenTeleprompter && (
-                <div className="h-px bg-[#333333] my-1"></div>
-              )}
-              {onOpenTeleprompter && (
-                <button
-                  onClick={() => {
-                    onOpenTeleprompter();
-                    setOpenMenu(null);
-                  }}
-                  className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs"
-                >
-                  <MonitorPlay className="w-3.5 h-3.5 text-[#ff7700]" />
-                  <span>Pop-out Teleprompter Window...</span>
-                </button>
-              )}
             </div>
           )}
         </div>

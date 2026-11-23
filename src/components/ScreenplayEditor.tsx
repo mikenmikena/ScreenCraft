@@ -58,6 +58,9 @@ interface ScreenplayEditorProps {
   collaboratorSuggestions?: CollaboratorSuggestion[];
   onInspectSuggestion?: (suggestionId: string) => void;
   focusedElementId?: string | null;
+  selectedElementIds?: string[];
+  onClearElementSelection?: () => void;
+  authoringViewMode?: 'normal' | 'simple' | 'page';
   onInspectContinuityElement?: (elementId: string) => void;
   scriptFormat?: ScriptFormatMode;
   onChangeScriptFormat?: (format: ScriptFormatMode) => void;
@@ -158,6 +161,9 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
   collaboratorSuggestions = [],
   onInspectSuggestion,
   focusedElementId = null,
+  selectedElementIds = [],
+  onClearElementSelection,
+  authoringViewMode = 'normal',
   onInspectContinuityElement,
   scriptFormat = 'single_column_film',
   onChangeScriptFormat,
@@ -180,6 +186,11 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
   const [hoveredElementId, setHoveredElementId] = useState<string | null>(null);
   const [elementsPopup, setElementsPopup] = useState<ElementsPopupState | null>(null);
   const [pendingFocusId, setPendingFocusId] = useState<string | null>(null);
+
+  const selectedElementIdSet = useMemo(
+    () => new Set(selectedElementIds),
+    [selectedElementIds]
+  );
 
   const pageLayoutMeta =
     PAGE_LAYOUT_OPTIONS.find((opt) => opt.id === (editorTypography.pageLayout || 'letter')) ||
@@ -1014,43 +1025,89 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
               })}
             </div>
           </div>
-        ) : (
-          /* Mode A: Screenplay Paper (Single-Column Live Formatted Page) */
-          <div
-            className={`bg-[#fbf9f4] text-black ${pageLayoutMeta.paperPaddingClass} rounded shadow-2xl min-h-[1150px] relative border border-[#e4ded0]`}
-          >
-            {/* Header Strip */}
-            <div className="flex items-center justify-between pb-6 border-b border-gray-300/60 mb-8 font-sans gap-4">
-              <div className="flex items-center gap-3 min-w-0">
-                <span className="text-[11px] uppercase tracking-widest text-gray-500 font-semibold tabular-nums">
-                  SCREENCRAFT SCREENPLAY MASTER • {editorTypography.fontFamily.toUpperCase()} ·{' '}
-                  {editorTypography.fontSizePt} PT · {editorTypography.lineSpacing}× ·{' '}
-                  {pageLayoutMeta.shortLabel.toUpperCase()}
-                </span>
-                {isRevisionPassMode && (
-                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-red-800 whitespace-nowrap">
-                    <History className="w-3 h-3" />
-                    <span>Revision Pass Active</span>
-                  </span>
-                )}
-              </div>
-              {onChangeScriptFormat && (
-                <button
-                  onClick={() => onChangeScriptFormat('av_multi_column')}
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#ece7db] hover:bg-[#e2dac8] text-gray-800 text-[11px] font-semibold border border-gray-300 transition-colors whitespace-nowrap shrink-0"
-                >
-                  <Columns className="w-3 h-3 text-amber-700" />
-                  <span>A/V Multi-Column View</span>
-                </button>
-              )}
+        ) : authoringViewMode === 'simple' ? (
+          /* Mode C: Simple View (Distraction-Free Minimal Script Flow) */
+          <div className="bg-[#1b1b1b] text-gray-100 rounded border border-[#2f2f2f] px-8 py-6 min-h-[820px] relative">
+            <div className="flex items-center justify-between pb-3 mb-5 border-b border-[#2e2e2e] font-sans text-[11px] text-gray-400">
+              <span className="uppercase tracking-wider font-semibold text-gray-300">
+                Simple View · Distraction-Free Draft ({elements.length} elements)
+              </span>
+              <span className="text-[10px] font-mono text-gray-500">
+                Press Ctrl+/ or Enter on empty line for Elements
+              </span>
             </div>
-
-            {/* Script Elements Flow */}
-            <div className="space-y-3">
+            <div className="space-y-2.5">
               {elements.map((element, idx) => {
+                const eff = getEffectiveElementFormatting(element, editorTypography);
+                const inlineStyle = buildElementTextStyle(eff, 'dark');
+                const meta = getElementMeta(element.type);
+                const isSelected = selectedElementIdSet.has(element.id);
+                const isActive = activeElementId === element.id;
+                const isScene = element.type === 'SCENE_HEADING';
+                const isChar = element.type === 'CHARACTER';
+                const isDial = element.type === 'DIALOGUE' || element.type === 'VOICE_OVER';
+
+                return (
+                  <div
+                    key={element.id}
+                    ref={(node) => {
+                      if (node) elementDomRefs.current.set(element.id, node);
+                      else elementDomRefs.current.delete(element.id);
+                    }}
+                    className={`relative rounded px-2 py-0.5 transition-colors ${
+                      isSelected
+                        ? 'ring-2 ring-sky-400/80 bg-sky-500/10'
+                        : isActive
+                        ? 'bg-white/[0.04]'
+                        : ''
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="w-7 pt-1 text-[10px] font-mono text-gray-500 shrink-0 select-none">
+                        [{meta.shortcutKey}]
+                      </span>
+                      <textarea
+                        ref={(node) => registerInputRef(element.id, node)}
+                        rows={estimateTextareaRows(element.text, 64, eff.fontSizePt)}
+                        value={element.text}
+                        placeholder={meta.placeholder}
+                        style={inlineStyle}
+                        onChange={(e) =>
+                          onUpdateElement(
+                            element.id,
+                            meta.uppercase ? e.target.value.toUpperCase() : e.target.value
+                          )
+                        }
+                        onKeyDown={(e) => handleKeyDown(e, element, idx)}
+                        onFocus={() => {
+                          if (selectedElementIds.length > 0) onClearElementSelection?.();
+                          setActiveElementId(element.id);
+                          onFocusElement?.(element);
+                        }}
+                        className={`w-full bg-transparent resize-none focus:outline-none ${
+                          isScene
+                            ? 'text-amber-300 font-bold tracking-wider uppercase pt-2 border-b border-[#333] pb-1'
+                            : isChar
+                            ? 'text-cyan-300 font-semibold uppercase text-center pt-1'
+                            : isDial
+                            ? 'text-gray-100 max-w-xl mx-auto block'
+                            : 'text-gray-300'
+                        }`}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          /* Mode A (Normal View) & Paginated (Page View) */
+          (() => {
+            const renderElementBlock = (element: ScreenplayElement, idx: number) => {
                 const elementComments = commentMap.get(element.id) || [];
                 const scene = element.sceneId ? sceneMap.get(element.sceneId) : undefined;
                 const isActive = activeElementId === element.id;
+                const isSelected = selectedElementIdSet.has(element.id);
                 const isVoiceOver = element.type === 'VOICE_OVER';
                 const inferredSpeaker = isVoiceOver
                   ? element.character || resolvePrecedingSpeaker(idx) || 'NARRATOR'
@@ -1078,6 +1135,7 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
                   onKeyDown: (e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) =>
                     handleKeyDown(e, element, idx),
                   onFocus: () => {
+                    if (selectedElementIds.length > 0) onClearElementSelection?.();
                     setActiveElementId(element.id);
                     onFocusElement?.(element);
                   },
@@ -1111,7 +1169,9 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
                         : undefined
                     }
                     className={`relative group transition-colors ${
-                      paperRev
+                      isSelected
+                        ? 'ring-2 ring-sky-500 bg-sky-100/70 rounded px-2 -mx-2'
+                        : paperRev
                         ? paperRev.wrapper
                         : elContinuityAlerts.length > 0
                         ? 'bg-rose-50/70 ring-1 ring-rose-300/90 rounded px-2 -mx-2'
@@ -1546,63 +1606,165 @@ export const ScreenplayEditor: React.FC<ScreenplayEditorProps> = ({
                     )}
                   </div>
                 );
-              })}
-            </div>
+            };
 
-            {/* Quick Insert Element Button at Bottom of Page */}
-            <div className="mt-12 pt-6 border-t border-gray-300 flex flex-wrap items-center justify-center gap-2 font-sans select-none">
-              <span className="text-xs text-gray-500">Insert element:</span>
-              <button
-                onClick={() =>
-                  onAddElementAfter(elements[elements.length - 1]?.id || 'root', 'SCENE_HEADING')
+            const quickInsertBar = (
+              <div className="mt-12 pt-6 border-t border-gray-300 flex flex-wrap items-center justify-center gap-2 font-sans select-none">
+                <span className="text-xs text-gray-500">Insert element:</span>
+                <button
+                  onClick={() =>
+                    onAddElementAfter(elements[elements.length - 1]?.id || 'root', 'SCENE_HEADING')
+                  }
+                  className="px-2.5 py-1 bg-[#eae6dc] hover:bg-amber-100 text-gray-800 rounded text-xs font-semibold border border-gray-300 transition-colors"
+                >
+                  + [S] Scene Heading
+                </button>
+                <button
+                  onClick={() =>
+                    onAddElementAfter(elements[elements.length - 1]?.id || 'root', 'ACTION')
+                  }
+                  className="px-2.5 py-1 bg-[#eae6dc] hover:bg-amber-100 text-gray-800 rounded text-xs font-semibold border border-gray-300 transition-colors"
+                >
+                  + [A] Action
+                </button>
+                <button
+                  onClick={() =>
+                    onAddElementAfter(elements[elements.length - 1]?.id || 'root', 'CHARACTER')
+                  }
+                  className="px-2.5 py-1 bg-[#eae6dc] hover:bg-amber-100 text-gray-800 rounded text-xs font-semibold border border-gray-300 transition-colors"
+                >
+                  + [C] Character
+                </button>
+                <button
+                  onClick={() =>
+                    onAddElementAfter(elements[elements.length - 1]?.id || 'root', 'DIALOGUE')
+                  }
+                  className="px-2.5 py-1 bg-[#eae6dc] hover:bg-amber-100 text-gray-800 rounded text-xs font-semibold border border-gray-300 transition-colors"
+                >
+                  + [D] Dialogue
+                </button>
+                <button
+                  onClick={() =>
+                    onAddElementAfter(elements[elements.length - 1]?.id || 'root', 'VOICE_OVER')
+                  }
+                  className="px-2.5 py-1 bg-violet-100 hover:bg-violet-200 text-violet-900 rounded text-xs font-semibold border border-violet-300 transition-colors"
+                >
+                  + [V] Voice-over
+                </button>
+                <button
+                  onClick={() => {
+                    const lastId = elements[elements.length - 1]?.id;
+                    if (lastId) openElementsPopupForElement(lastId);
+                  }}
+                  className="px-2.5 py-1 bg-[#e6f6ff] hover:bg-[#cdeeff] text-sky-900 rounded text-xs font-semibold border border-[#5cc2ff] transition-colors"
+                >
+                  All Elements (Ctrl+/)
+                </button>
+              </div>
+            );
+
+            if (authoringViewMode === 'page') {
+              // Chunk elements into discrete screenplay pages (~44 weighted lines per page)
+              const pages: { pageNumber: number; items: { element: ScreenplayElement; idx: number }[] }[] = [];
+              let currentItems: { element: ScreenplayElement; idx: number }[] = [];
+              let currentLines = 0;
+              const MAX_LINES_PER_PAGE = 44;
+
+              elements.forEach((el, idx) => {
+                const eff = getEffectiveElementFormatting(el, editorTypography);
+                const widthCols = el.type === 'DIALOGUE' || el.type === 'VOICE_OVER' ? 38 : 60;
+                const elLines =
+                  estimateTextareaRows(el.text, widthCols, eff.fontSizePt) +
+                  (el.type === 'SCENE_HEADING' ? 3 : el.type === 'CHARACTER' ? 2 : 1);
+                if (currentItems.length > 0 && currentLines + elLines > MAX_LINES_PER_PAGE) {
+                  pages.push({ pageNumber: pages.length + 1, items: currentItems });
+                  currentItems = [];
+                  currentLines = 0;
                 }
-                className="px-2.5 py-1 bg-[#eae6dc] hover:bg-amber-100 text-gray-800 rounded text-xs font-semibold border border-gray-300 transition-colors"
+                currentItems.push({ element: el, idx });
+                currentLines += elLines;
+              });
+              if (currentItems.length > 0 || pages.length === 0) {
+                pages.push({ pageNumber: pages.length + 1, items: currentItems });
+              }
+
+              return (
+                <div className="space-y-8 pb-12">
+                  {pages.map((pg, pageIdx) => (
+                    <div
+                      key={`script-page-${pg.pageNumber}`}
+                      className={`bg-[#fbf9f4] text-black ${pageLayoutMeta.paperPaddingClass} rounded shadow-2xl min-h-[1056px] relative border border-[#dcd4c0] flex flex-col justify-between`}
+                    >
+                      <div>
+                        {/* Physical Page Number Header */}
+                        <div className="flex items-center justify-between pb-4 mb-6 border-b border-gray-300/50 font-sans">
+                          <span className="text-[10px] uppercase tracking-widest text-gray-400 font-semibold">
+                            {pageIdx === 0
+                              ? `PAGE VIEW • ${pageLayoutMeta.shortLabel.toUpperCase()}`
+                              : `PAGE ${pg.pageNumber} OF ${pages.length}`}
+                          </span>
+                          <span className="font-courier text-xs font-bold text-gray-600 tabular-nums">
+                            {pg.pageNumber}.
+                          </span>
+                        </div>
+
+                        <div className="space-y-3">
+                          {pg.items.map(({ element, idx }) => renderElementBlock(element, idx))}
+                        </div>
+                      </div>
+
+                      {pageIdx === pages.length - 1 ? (
+                        quickInsertBar
+                      ) : (
+                        <div className="pt-8 text-right font-courier text-[11px] text-gray-400 select-none">
+                          (CONTINUED)
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              );
+            }
+
+            return (
+              <div
+                className={`bg-[#fbf9f4] text-black ${pageLayoutMeta.paperPaddingClass} rounded shadow-2xl min-h-[1150px] relative border border-[#e4ded0]`}
               >
-                + [S] Scene Heading
-              </button>
-              <button
-                onClick={() =>
-                  onAddElementAfter(elements[elements.length - 1]?.id || 'root', 'ACTION')
-                }
-                className="px-2.5 py-1 bg-[#eae6dc] hover:bg-amber-100 text-gray-800 rounded text-xs font-semibold border border-gray-300 transition-colors"
-              >
-                + [A] Action
-              </button>
-              <button
-                onClick={() =>
-                  onAddElementAfter(elements[elements.length - 1]?.id || 'root', 'CHARACTER')
-                }
-                className="px-2.5 py-1 bg-[#eae6dc] hover:bg-amber-100 text-gray-800 rounded text-xs font-semibold border border-gray-300 transition-colors"
-              >
-                + [C] Character
-              </button>
-              <button
-                onClick={() =>
-                  onAddElementAfter(elements[elements.length - 1]?.id || 'root', 'DIALOGUE')
-                }
-                className="px-2.5 py-1 bg-[#eae6dc] hover:bg-amber-100 text-gray-800 rounded text-xs font-semibold border border-gray-300 transition-colors"
-              >
-                + [D] Dialogue
-              </button>
-              <button
-                onClick={() =>
-                  onAddElementAfter(elements[elements.length - 1]?.id || 'root', 'VOICE_OVER')
-                }
-                className="px-2.5 py-1 bg-violet-100 hover:bg-violet-200 text-violet-900 rounded text-xs font-semibold border border-violet-300 transition-colors"
-              >
-                + [V] Voice-over
-              </button>
-              <button
-                onClick={() => {
-                  const lastId = elements[elements.length - 1]?.id;
-                  if (lastId) openElementsPopupForElement(lastId);
-                }}
-                className="px-2.5 py-1 bg-[#e6f6ff] hover:bg-[#cdeeff] text-sky-900 rounded text-xs font-semibold border border-[#5cc2ff] transition-colors"
-              >
-                All Elements (Ctrl+/)
-              </button>
-            </div>
-          </div>
+                {/* Header Strip */}
+                <div className="flex items-center justify-between pb-6 border-b border-gray-300/60 mb-8 font-sans gap-4">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="text-[11px] uppercase tracking-widest text-gray-500 font-semibold tabular-nums">
+                      SCREENCRAFT SCREENPLAY MASTER • {editorTypography.fontFamily.toUpperCase()} ·{' '}
+                      {editorTypography.fontSizePt} PT · {editorTypography.lineSpacing}× ·{' '}
+                      {pageLayoutMeta.shortLabel.toUpperCase()}
+                    </span>
+                    {isRevisionPassMode && (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-red-800 whitespace-nowrap">
+                        <History className="w-3 h-3" />
+                        <span>Revision Pass Active</span>
+                      </span>
+                    )}
+                  </div>
+                  {onChangeScriptFormat && (
+                    <button
+                      onClick={() => onChangeScriptFormat('av_multi_column')}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#ece7db] hover:bg-[#e2dac8] text-gray-800 text-[11px] font-semibold border border-gray-300 transition-colors whitespace-nowrap shrink-0"
+                    >
+                      <Columns className="w-3 h-3 text-amber-700" />
+                      <span>A/V Multi-Column View</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Script Elements Flow */}
+                <div className="space-y-3">
+                  {elements.map((element, idx) => renderElementBlock(element, idx))}
+                </div>
+
+                {quickInsertBar}
+              </div>
+            );
+          })()
         )}
       </div>
 
