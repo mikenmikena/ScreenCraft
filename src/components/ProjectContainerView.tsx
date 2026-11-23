@@ -199,8 +199,8 @@ export const ProjectContainerView: React.FC<ProjectContainerViewProps> = ({
   return (
     <div className="flex-1 bg-[#1e1e1e] text-gray-200 flex flex-col min-h-0 overflow-hidden text-xs select-none">
       {/* Top Toolbar */}
-      <div className="bg-[#272727] border-b border-[#3a3a3a] px-5 py-2.5 flex items-center justify-between gap-4 flex-shrink-0">
-        <div className="flex items-center gap-4 min-w-0">
+      <div className="bg-[#272727] border-b border-[#3a3a3a] px-5 py-2.5 flex flex-wrap items-center justify-between gap-3 flex-shrink-0">
+        <div className="flex flex-wrap items-center gap-3 min-w-0 flex-1">
           <div className="flex items-center gap-2 min-w-0">
             <BookOpen className="w-4 h-4 text-[#ff8000] shrink-0" />
             <h1 className="text-sm font-bold text-gray-100 truncate">
@@ -208,7 +208,7 @@ export const ProjectContainerView: React.FC<ProjectContainerViewProps> = ({
             </h1>
           </div>
 
-          <div className="flex items-center p-0.5 bg-[#181818] rounded border border-[#3a3a3a]">
+          <div className="flex flex-wrap items-center gap-0.5 p-0.5 bg-[#181818] rounded border border-[#3a3a3a] min-w-0">
             {(
               [
                 { id: 'overview', label: 'Logline & Overview', icon: BookOpen },
@@ -242,8 +242,8 @@ export const ProjectContainerView: React.FC<ProjectContainerViewProps> = ({
         </div>
 
         {/* Script Mode & Quick Jump */}
-        <div className="flex items-center gap-2 shrink-0">
-          <div className="flex items-center p-0.5 bg-[#181818] rounded border border-[#3a3a3a]">
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
+          <div className="flex flex-wrap items-center gap-0.5 p-0.5 bg-[#181818] rounded border border-[#3a3a3a]">
             <button
               onClick={() => {
                 onSwitchScriptFormat('single_column_film');

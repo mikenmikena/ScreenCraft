@@ -228,8 +228,8 @@ export const ProjectsBrowser: React.FC<ProjectsBrowserProps> = ({
           </div>
 
           {/* Section Switcher: All / Authoring / Production */}
-          <div className="flex items-center gap-2 flex-wrap shrink-0">
-            <div className="flex items-center bg-[#151515] border border-[#383838] rounded-md p-1 gap-1">
+          <div className="flex items-center gap-2 flex-wrap min-w-0">
+            <div className="flex flex-wrap items-center bg-[#151515] border border-[#383838] rounded-md p-1 gap-1">
               <button
                 type="button"
                 onClick={() => setActiveSection('all')}

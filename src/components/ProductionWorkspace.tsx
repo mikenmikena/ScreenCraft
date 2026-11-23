@@ -300,7 +300,7 @@ export const ProductionWorkspace: React.FC<ProductionWorkspaceProps> = ({
           </span>
         </div>
 
-        <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+        <div className="flex items-center gap-1.5 flex-wrap min-w-0">
           <button
             type="button"
             onClick={onImportScriptCast}
@@ -368,8 +368,8 @@ export const ProductionWorkspace: React.FC<ProductionWorkspaceProps> = ({
         </div>
       </div>
 
-      {/* Row 2: Unified Production Tool Tabs */}
-      <div className="bg-[#1b1b1b] border-b border-[#333333] px-3 py-1.5 flex items-center gap-1 overflow-x-auto no-scrollbar shrink-0">
+      {/* Row 2: Unified Production Tool Tabs (wraps cleanly onto subsequent rows if exceeding pane width) */}
+      <div className="bg-[#1b1b1b] border-b border-[#333333] px-3 py-1.5 flex flex-wrap items-center gap-1 shrink-0">
         {tabItems.map((tab) => {
           const isActive = activeTab === tab.id;
           return (

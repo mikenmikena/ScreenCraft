@@ -611,7 +611,7 @@ export const ProductionBudgetPanel: React.FC<ProductionBudgetPanelProps> = ({
       {/* Top Budget Controls & Parameters Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 bg-[#222222] border border-[#353535] rounded p-3">
         <div className="flex items-center gap-2.5 flex-wrap">
-          <div className="flex items-center p-0.5 bg-[#161616] rounded border border-[#383838]">
+          <div className="flex flex-wrap items-center gap-0.5 p-0.5 bg-[#161616] rounded border border-[#383838]">
             <button
               onClick={() => setChartView('running')}
               className={`px-3 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
@@ -634,7 +634,7 @@ export const ProductionBudgetPanel: React.FC<ProductionBudgetPanelProps> = ({
             </button>
           </div>
 
-          <div className="flex items-center p-0.5 bg-[#161616] rounded border border-[#383838]">
+          <div className="flex flex-wrap items-center gap-0.5 p-0.5 bg-[#161616] rounded border border-[#383838]">
             {(['all', 'cast', 'crew'] as const).map((cat) => (
               <button
                 key={cat}

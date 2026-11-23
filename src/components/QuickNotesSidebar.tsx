@@ -397,8 +397,8 @@ export const QuickNotesSidebar: React.FC<QuickNotesSidebarProps> = ({
       </div>
 
       {/* Mode & Scope Controls */}
-      <div className="px-3 py-2 bg-[#1c1c1c] border-b border-[#2e2e2e] flex items-center justify-between gap-2 shrink-0 select-none">
-        <div className="flex items-center p-0.5 bg-[#121212] rounded border border-[#2f2f2f]">
+      <div className="px-3 py-2 bg-[#1c1c1c] border-b border-[#2e2e2e] flex flex-wrap items-center justify-between gap-2 shrink-0 select-none">
+        <div className="flex flex-wrap items-center gap-0.5 p-0.5 bg-[#121212] rounded border border-[#2f2f2f]">
           <button
             type="button"
             onClick={() => setActiveTab('scratchpad')}
@@ -423,7 +423,7 @@ export const QuickNotesSidebar: React.FC<QuickNotesSidebarProps> = ({
           </button>
         </div>
 
-        <div className="flex items-center p-0.5 bg-[#121212] rounded border border-[#2f2f2f]">
+        <div className="flex flex-wrap items-center gap-0.5 p-0.5 bg-[#121212] rounded border border-[#2f2f2f]">
           <button
             type="button"
             onClick={() => setScope('project')}

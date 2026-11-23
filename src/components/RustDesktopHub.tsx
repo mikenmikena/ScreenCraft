@@ -231,8 +231,8 @@ export const RustDesktopHub: React.FC<RustDesktopHubProps> = ({ currentProject }
         {/* Source Code Inspector */}
         <div className="bg-[#202020] rounded border border-[#383838] overflow-hidden">
           {/* File Tab Selector */}
-          <div className="flex items-center justify-between bg-[#191919] border-b border-[#333] px-2 overflow-x-auto">
-            <div className="flex items-center space-x-1 py-1">
+          <div className="flex flex-wrap items-center justify-between gap-2 bg-[#191919] border-b border-[#333] px-2 py-1.5">
+            <div className="flex flex-wrap items-center gap-1 min-w-0 flex-1">
               {[
                 { id: 'main.rs', label: 'src-tauri/src/main.rs', icon: FileCode },
                 { id: 'screenplay.rs', label: 'src/screenplay.rs', icon: FileCode },
@@ -246,7 +246,7 @@ export const RustDesktopHub: React.FC<RustDesktopHubProps> = ({ currentProject }
                 <button
                   key={item.id}
                   onClick={() => setSelectedFile(item.id as any)}
-                  className={`px-3 py-1.5 rounded text-xs font-mono font-medium flex items-center space-x-1.5 transition-colors ${
+                  className={`px-3 py-1.5 rounded text-xs font-mono font-medium flex items-center space-x-1.5 whitespace-nowrap shrink-0 transition-colors ${
                     selectedFile === item.id
                       ? 'bg-[#292929] text-[#ff8000] border-b-2 border-[#ff8000]'
                       : 'text-gray-400 hover:text-gray-200 hover:bg-[#222]'
@@ -260,7 +260,7 @@ export const RustDesktopHub: React.FC<RustDesktopHubProps> = ({ currentProject }
 
             <button
               onClick={handleCopy}
-              className="flex items-center space-x-1 px-2.5 py-1 text-gray-300 hover:text-white bg-[#262626] hover:bg-[#333] rounded border border-[#444] transition-colors"
+              className="flex items-center space-x-1 px-2.5 py-1 text-gray-300 hover:text-white bg-[#262626] hover:bg-[#333] rounded border border-[#444] transition-colors shrink-0 whitespace-nowrap"
             >
               {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
               <span>{copied ? 'Copied' : 'Copy'}</span>

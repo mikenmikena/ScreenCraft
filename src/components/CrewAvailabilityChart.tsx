@@ -490,7 +490,7 @@ export const CrewAvailabilityChart: React.FC<CrewAvailabilityChartProps> = ({
       {/* Top Controls & Conflict Summary Strip */}
       <div className="flex flex-wrap items-center justify-between gap-3 bg-[#222222] border border-[#353535] rounded p-3">
         <div className="flex items-center gap-3 flex-wrap">
-          <div className="flex items-center p-0.5 bg-[#161616] rounded border border-[#383838]">
+          <div className="flex flex-wrap items-center gap-0.5 p-0.5 bg-[#161616] rounded border border-[#383838]">
             <button
               onClick={() => setChartMode('timeline')}
               className={`px-3 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
@@ -513,7 +513,7 @@ export const CrewAvailabilityChart: React.FC<CrewAvailabilityChartProps> = ({
             </button>
           </div>
 
-          <div className="flex items-center p-0.5 bg-[#161616] rounded border border-[#383838]">
+          <div className="flex flex-wrap items-center gap-0.5 p-0.5 bg-[#161616] rounded border border-[#383838]">
             {(['all', 'cast', 'crew'] as const).map((cat) => (
               <button
                 key={cat}

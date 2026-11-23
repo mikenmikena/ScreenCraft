@@ -135,7 +135,7 @@ export const OutlineWorkspace: React.FC<OutlineWorkspaceProps> = ({
             ))}
           </select>
 
-          <div className="flex items-center p-0.5 bg-[#161618] border border-[#383840] rounded">
+          <div className="flex flex-wrap items-center gap-0.5 p-0.5 bg-[#161618] border border-[#383840] rounded">
             <button
               type="button"
               onClick={() => setViewMode('acts')}

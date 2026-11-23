@@ -266,7 +266,7 @@ export const CharacterBreakdownPanel: React.FC<CharacterBreakdownPanelProps> = (
             )}
           </div>
 
-          <div className="flex items-center p-0.5 bg-[#151515] rounded border border-[#343434]">
+          <div className="flex flex-wrap items-center gap-0.5 p-0.5 bg-[#151515] rounded border border-[#343434]">
             {(
               [
                 { id: 'all', label: 'All' },
@@ -279,7 +279,7 @@ export const CharacterBreakdownPanel: React.FC<CharacterBreakdownPanelProps> = (
                 key={tab.id}
                 type="button"
                 onClick={() => setFilterMode(tab.id)}
-                className={`flex-1 px-2 py-1 rounded text-[11px] font-medium transition-colors whitespace-nowrap shrink-0 ${
+                className={`flex-1 min-w-fit px-2 py-1 rounded text-[11px] font-medium transition-colors whitespace-nowrap ${
                   filterMode === tab.id
                     ? 'bg-[#2c2c2c] text-[#ff8000]'
                     : 'text-gray-400 hover:text-gray-200'

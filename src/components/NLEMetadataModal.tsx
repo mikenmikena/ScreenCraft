@@ -492,9 +492,9 @@ export const NLEMetadataModal: React.FC<NLEMetadataModalProps> = ({
           </div>
         </div>
 
-        {/* Navigation Sub-tabs */}
-        <div className="px-5 py-2 bg-[#1e1e1e] border-b border-[#343434] flex items-center justify-between gap-4 flex-shrink-0">
-          <div className="flex items-center p-0.5 bg-[#151515] rounded border border-[#363636]">
+        {/* Navigation Sub-tabs (wraps onto a second row when exceeding modal width) */}
+        <div className="px-5 py-2 bg-[#1e1e1e] border-b border-[#343434] flex flex-wrap items-center justify-between gap-2 flex-shrink-0">
+          <div className="flex flex-wrap items-center gap-0.5 p-0.5 bg-[#151515] rounded border border-[#363636] min-w-0">
             <button
               onClick={() => setActiveTab('export')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs transition-colors whitespace-nowrap shrink-0 ${

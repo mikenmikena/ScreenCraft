@@ -36,14 +36,14 @@ export const ReportsModal: React.FC<ReportsModalProps> = ({ project, onClose }) 
           </button>
         </div>
 
-        {/* Report Tabs */}
-        <div className="flex border-b border-[#383838] bg-[#1e1e1e]">
+        {/* Report Tabs (wraps cleanly onto a second row if exceeding modal width) */}
+        <div className="flex flex-wrap gap-1 p-1 border-b border-[#383838] bg-[#1e1e1e]">
           <button
             onClick={() => setActiveReport('cast')}
-            className={`flex-1 py-2 text-center font-semibold tracking-wide border-r border-[#333] transition-colors flex items-center justify-center space-x-1.5 ${
+            className={`flex-1 min-w-fit py-1.5 px-3 rounded text-center font-semibold tracking-wide border transition-colors flex items-center justify-center space-x-1.5 whitespace-nowrap ${
               activeReport === 'cast'
-                ? 'bg-[#242424] text-[#ff8000] border-t-2 border-t-[#ff8000]'
-                : 'text-gray-400 hover:text-gray-200'
+                ? 'bg-[#242424] text-[#ff8000] border-[#ff8000]/60'
+                : 'text-gray-400 hover:text-gray-200 hover:bg-[#232323] border-transparent'
             }`}
           >
             <Users className="w-3.5 h-3.5" />
@@ -51,10 +51,10 @@ export const ReportsModal: React.FC<ReportsModalProps> = ({ project, onClose }) 
           </button>
           <button
             onClick={() => setActiveReport('locations')}
-            className={`flex-1 py-2 text-center font-semibold tracking-wide border-r border-[#333] transition-colors flex items-center justify-center space-x-1.5 ${
+            className={`flex-1 min-w-fit py-1.5 px-3 rounded text-center font-semibold tracking-wide border transition-colors flex items-center justify-center space-x-1.5 whitespace-nowrap ${
               activeReport === 'locations'
-                ? 'bg-[#242424] text-[#ff8000] border-t-2 border-t-[#ff8000]'
-                : 'text-gray-400 hover:text-gray-200'
+                ? 'bg-[#242424] text-[#ff8000] border-[#ff8000]/60'
+                : 'text-gray-400 hover:text-gray-200 hover:bg-[#232323] border-transparent'
             }`}
           >
             <MapPin className="w-3.5 h-3.5" />
@@ -62,10 +62,10 @@ export const ReportsModal: React.FC<ReportsModalProps> = ({ project, onClose }) 
           </button>
           <button
             onClick={() => setActiveReport('schedule')}
-            className={`flex-1 py-2 text-center font-semibold tracking-wide transition-colors flex items-center justify-center space-x-1.5 ${
+            className={`flex-1 min-w-fit py-1.5 px-3 rounded text-center font-semibold tracking-wide border transition-colors flex items-center justify-center space-x-1.5 whitespace-nowrap ${
               activeReport === 'schedule'
-                ? 'bg-[#242424] text-[#ff8000] border-t-2 border-t-[#ff8000]'
-                : 'text-gray-400 hover:text-gray-200'
+                ? 'bg-[#242424] text-[#ff8000] border-[#ff8000]/60'
+                : 'text-gray-400 hover:text-gray-200 hover:bg-[#232323] border-transparent'
             }`}
           >
             <Calendar className="w-3.5 h-3.5" />

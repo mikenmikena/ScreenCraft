@@ -548,7 +548,7 @@ export const ScheduleOptimizerModal: React.FC<ScheduleOptimizerModalProps> = ({
 
             {/* Sub-Tab Controls + Optimal State Callout */}
             <div className="px-4 py-2.5 bg-[#212121] border-b border-[#323232] flex flex-wrap items-center justify-between gap-3 shrink-0">
-              <div className="flex items-center gap-1 p-0.5 bg-[#151515] rounded border border-[#323232]">
+              <div className="flex flex-wrap items-center gap-1 p-0.5 bg-[#151515] rounded border border-[#323232] min-w-0">
                 <button
                   onClick={() => setActiveTab('schedule')}
                   className={`px-3 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${

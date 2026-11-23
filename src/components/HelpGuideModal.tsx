@@ -697,8 +697,8 @@ export const HelpGuideModal: React.FC<HelpGuideModalProps> = ({
           </div>
         </div>
 
-        {/* Category Filter Strip */}
-        <div className="px-5 py-2 bg-[#1a1a1a] border-b border-[#323232] flex items-center gap-1.5 overflow-x-auto shrink-0">
+        {/* Category Filter Strip (wraps onto a second row when exceeding pane width) */}
+        <div className="px-5 py-2 bg-[#1a1a1a] border-b border-[#323232] flex flex-wrap items-center gap-1.5 shrink-0">
           {CATEGORY_TABS.map((cat) => (
             <button
               key={cat.id}

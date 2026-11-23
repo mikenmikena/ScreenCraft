@@ -122,7 +122,7 @@ export const SceneContinuityModal: React.FC<SceneContinuityModalProps> = ({
 
         {/* Navigation Tabs & Search */}
         <div className="px-5 py-2.5 bg-[#1a1a1a] border-b border-[#323232] flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-1 overflow-x-auto">
+          <div className="flex flex-wrap items-center gap-1 min-w-0">
             <button
               type="button"
               onClick={() => setActiveTab('all')}

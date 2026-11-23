@@ -52,9 +52,9 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
 
   return (
     <header className="bg-[#1f1f1f] border-b border-[#383838] select-none text-xs">
-      <div className="flex items-center justify-between px-3 h-10 gap-2">
+      <div className="flex flex-wrap items-center justify-between px-3 min-h-10 py-1 gap-x-3 gap-y-1.5">
         {/* Brand & Primary 7-Workspace Navigation */}
-        <div className="flex items-center space-x-2 min-w-0 overflow-x-auto no-scrollbar">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0 flex-1">
           {/* ScreenCraft Brand Icon & Name */}
           <div className="flex items-center space-x-2 shrink-0 pr-1">
             <BrandIcon size="sm" />
@@ -82,15 +82,15 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
             <Home className="w-4 h-4" />
           </button>
 
-          {/* 7 Primary Workspaces */}
-          <nav className="flex items-center space-x-0.5 ml-1">
+          {/* 7 Primary Workspaces (wraps cleanly onto a second row if tabs exceed header width) */}
+          <nav className="flex flex-wrap items-center gap-x-0.5 gap-y-1 ml-1">
             {navItems.map((item) => {
               const isActive = activeWorkspace === item.id;
               return (
                 <button
                   key={item.id}
                   onClick={() => onSelectWorkspace(item.id)}
-                  className={`px-2.5 py-1.5 font-semibold text-[11px] tracking-wide transition-colors rounded-t flex items-center space-x-1.5 whitespace-nowrap shrink-0 ${
+                  className={`px-2.5 py-1.5 font-semibold text-[11px] tracking-wide transition-colors rounded flex items-center space-x-1.5 whitespace-nowrap shrink-0 ${
                     isActive
                       ? 'text-[#ff8000] border-b-2 border-[#ff8000] bg-[#292929]'
                       : 'text-gray-400 hover:text-gray-200 hover:bg-[#2a2a2a]'

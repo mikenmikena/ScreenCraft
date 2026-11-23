@@ -457,16 +457,15 @@ export const InspectorColumn: React.FC<InspectorColumnProps> = ({
         )}
       </div>
 
-      {/* Stacked 2-Row Tab Grid (4 Columns × 2 Rows for Clear Scannability) */}
-      <div className="grid grid-cols-4 border-b border-[#383838] bg-[#1c1c1c] text-[10px]">
-        {/* Row 1 */}
+      {/* Multi-Row Wrapping Tab Strip */}
+      <div className="flex flex-wrap items-center gap-1 p-1.5 border-b border-[#383838] bg-[#1c1c1c] text-[10px]">
         <button
           type="button"
           onClick={() => setActiveTab('properties')}
-          className={`py-2 px-1 flex items-center justify-center gap-1 font-semibold transition-colors border-r border-b border-[#303030] whitespace-nowrap truncate ${
+          className={`flex-auto px-2 py-1.5 rounded flex items-center justify-center gap-1 font-semibold transition-colors border whitespace-nowrap ${
             activeTab === 'properties'
-              ? 'bg-[#262626] text-[#ff8000] shadow-[inset_0_2px_0_0_#ff8000]'
-              : 'text-gray-400 hover:text-gray-200 hover:bg-[#222]'
+              ? 'bg-[#262626] text-[#ff8000] border-[#ff8000]/60'
+              : 'text-gray-400 hover:text-gray-200 hover:bg-[#222] border-transparent'
           }`}
           title="Scene Properties"
         >
@@ -476,10 +475,10 @@ export const InspectorColumn: React.FC<InspectorColumnProps> = ({
         <button
           type="button"
           onClick={() => setActiveTab('comments')}
-          className={`py-2 px-1 flex items-center justify-center gap-1 font-semibold transition-colors border-r border-b border-[#303030] whitespace-nowrap truncate tabular-nums ${
+          className={`flex-auto px-2 py-1.5 rounded flex items-center justify-center gap-1 font-semibold transition-colors border whitespace-nowrap tabular-nums ${
             activeTab === 'comments'
-              ? 'bg-[#262626] text-[#ff8000] shadow-[inset_0_2px_0_0_#ff8000]'
-              : 'text-gray-400 hover:text-gray-200 hover:bg-[#222]'
+              ? 'bg-[#262626] text-[#ff8000] border-[#ff8000]/60'
+              : 'text-gray-400 hover:text-gray-200 hover:bg-[#222] border-transparent'
           }`}
           title="Review Comments"
         >
@@ -489,10 +488,10 @@ export const InspectorColumn: React.FC<InspectorColumnProps> = ({
         <button
           type="button"
           onClick={() => setActiveTab('tags')}
-          className={`py-2 px-1 flex items-center justify-center gap-1 font-semibold transition-colors border-r border-b border-[#303030] whitespace-nowrap truncate tabular-nums ${
+          className={`flex-auto px-2 py-1.5 rounded flex items-center justify-center gap-1 font-semibold transition-colors border whitespace-nowrap tabular-nums ${
             activeTab === 'tags'
-              ? 'bg-[#262626] text-[#ff8000] shadow-[inset_0_2px_0_0_#ff8000]'
-              : 'text-gray-400 hover:text-gray-200 hover:bg-[#222]'
+              ? 'bg-[#262626] text-[#ff8000] border-[#ff8000]/60'
+              : 'text-gray-400 hover:text-gray-200 hover:bg-[#222] border-transparent'
           }`}
           title="Scene & Script Tags"
         >
@@ -502,27 +501,25 @@ export const InspectorColumn: React.FC<InspectorColumnProps> = ({
         <button
           type="button"
           onClick={() => setActiveTab('history')}
-          className={`py-2 px-1 flex items-center justify-center gap-1 font-semibold transition-colors border-b border-[#303030] whitespace-nowrap truncate tabular-nums ${
+          className={`flex-auto px-2 py-1.5 rounded flex items-center justify-center gap-1 font-semibold transition-colors border whitespace-nowrap tabular-nums ${
             activeTab === 'history'
-              ? 'bg-[#262626] text-[#ff8000] shadow-[inset_0_2px_0_0_#ff8000]'
-              : 'text-gray-400 hover:text-gray-200 hover:bg-[#222]'
+              ? 'bg-[#262626] text-[#ff8000] border-[#ff8000]/60'
+              : 'text-gray-400 hover:text-gray-200 hover:bg-[#222] border-transparent'
           }`}
           title="History & Draft Revisions"
         >
           <History className="w-3 h-3 shrink-0" />
           <span>History</span>
         </button>
-
-        {/* Row 2 */}
         <button
           type="button"
           onClick={() => setActiveTab('continuity')}
-          className={`py-2 px-1 flex items-center justify-center gap-1 font-semibold transition-colors border-r border-[#303030] whitespace-nowrap truncate tabular-nums ${
+          className={`flex-auto px-2 py-1.5 rounded flex items-center justify-center gap-1 font-semibold transition-colors border whitespace-nowrap tabular-nums ${
             activeTab === 'continuity'
-              ? 'bg-[#262626] text-[#ff8000] shadow-[inset_0_2px_0_0_#ff8000]'
+              ? 'bg-[#262626] text-[#ff8000] border-[#ff8000]/60'
               : activeContinuityCount > 0
-              ? 'text-rose-300 hover:text-rose-200 hover:bg-[#222]'
-              : 'text-gray-400 hover:text-gray-200 hover:bg-[#222]'
+              ? 'text-rose-300 hover:text-rose-200 hover:bg-[#222] border-transparent'
+              : 'text-gray-400 hover:text-gray-200 hover:bg-[#222] border-transparent'
           }`}
           title="Automated Prop & Costume Continuity Check"
         >
@@ -536,10 +533,10 @@ export const InspectorColumn: React.FC<InspectorColumnProps> = ({
         <button
           type="button"
           onClick={() => setActiveTab('proofread')}
-          className={`py-2 px-1 flex items-center justify-center gap-1 font-semibold transition-colors border-r border-[#303030] whitespace-nowrap truncate tabular-nums ${
+          className={`flex-auto px-2 py-1.5 rounded flex items-center justify-center gap-1 font-semibold transition-colors border whitespace-nowrap tabular-nums ${
             activeTab === 'proofread'
-              ? 'bg-[#262626] text-[#ff8000] shadow-[inset_0_2px_0_0_#ff8000]'
-              : 'text-gray-400 hover:text-gray-200 hover:bg-[#222]'
+              ? 'bg-[#262626] text-[#ff8000] border-[#ff8000]/60'
+              : 'text-gray-400 hover:text-gray-200 hover:bg-[#222] border-transparent'
           }`}
           title="Spell Check & Grammar Check"
         >
@@ -549,10 +546,10 @@ export const InspectorColumn: React.FC<InspectorColumnProps> = ({
         <button
           type="button"
           onClick={() => setActiveTab('characters')}
-          className={`py-2 px-1 flex items-center justify-center gap-1 font-semibold transition-colors border-r border-[#303030] whitespace-nowrap truncate tabular-nums ${
+          className={`flex-auto px-2 py-1.5 rounded flex items-center justify-center gap-1 font-semibold transition-colors border whitespace-nowrap tabular-nums ${
             activeTab === 'characters'
-              ? 'bg-[#262626] text-[#ff8000] shadow-[inset_0_2px_0_0_#ff8000]'
-              : 'text-gray-400 hover:text-gray-200 hover:bg-[#222]'
+              ? 'bg-[#262626] text-[#ff8000] border-[#ff8000]/60'
+              : 'text-gray-400 hover:text-gray-200 hover:bg-[#222] border-transparent'
           }`}
           title="Character Info & Dialogue Counts"
         >
@@ -562,10 +559,10 @@ export const InspectorColumn: React.FC<InspectorColumnProps> = ({
         <button
           type="button"
           onClick={() => setActiveTab('shots')}
-          className={`py-2 px-1 flex items-center justify-center gap-1 font-semibold transition-colors whitespace-nowrap truncate tabular-nums ${
+          className={`flex-auto px-2 py-1.5 rounded flex items-center justify-center gap-1 font-semibold transition-colors border whitespace-nowrap tabular-nums ${
             activeTab === 'shots'
-              ? 'bg-[#262626] text-[#ff8000] shadow-[inset_0_2px_0_0_#ff8000]'
-              : 'text-gray-400 hover:text-gray-200 hover:bg-[#222]'
+              ? 'bg-[#262626] text-[#ff8000] border-[#ff8000]/60'
+              : 'text-gray-400 hover:text-gray-200 hover:bg-[#222] border-transparent'
           }`}
           title="Storyboard & Camera Shots"
         >
@@ -1228,7 +1225,7 @@ export const InspectorColumn: React.FC<InspectorColumnProps> = ({
             </div>
 
             {/* Filter pills */}
-            <div className="flex items-center space-x-1 overflow-x-auto no-scrollbar py-0.5 text-[10px]">
+            <div className="flex flex-wrap items-center gap-1 py-0.5 text-[10px]">
               {[
                 { id: 'all', label: 'All' },
                 { id: 'edits', label: 'Edits' },
@@ -1448,11 +1445,11 @@ export const InspectorColumn: React.FC<InspectorColumnProps> = ({
         <div className="flex flex-col flex-1 min-h-0 bg-[#242424]">
           <div className="p-2.5 border-b border-[#333] bg-[#1e1e1e] space-y-2">
             {/* Scope Toggle: This Scene vs Entire Project */}
-            <div className="grid grid-cols-2 p-0.5 bg-[#151515] rounded border border-[#3a3a3a]">
+            <div className="flex flex-wrap gap-1 p-0.5 bg-[#151515] rounded border border-[#3a3a3a]">
               <button
                 type="button"
                 onClick={() => setProofreadScope('scene')}
-                className={`py-1 rounded text-[11px] font-semibold transition-colors ${
+                className={`flex-1 min-w-fit px-2 py-1 rounded text-[11px] font-semibold transition-colors whitespace-nowrap ${
                   proofreadScope === 'scene'
                     ? 'bg-[#2d2d2d] text-[#ff8000]'
                     : 'text-gray-400 hover:text-gray-200'
@@ -1463,7 +1460,7 @@ export const InspectorColumn: React.FC<InspectorColumnProps> = ({
               <button
                 type="button"
                 onClick={() => setProofreadScope('project')}
-                className={`py-1 rounded text-[11px] font-semibold transition-colors ${
+                className={`flex-1 min-w-fit px-2 py-1 rounded text-[11px] font-semibold transition-colors whitespace-nowrap ${
                   proofreadScope === 'project'
                     ? 'bg-[#2d2d2d] text-[#ff8000]'
                     : 'text-gray-400 hover:text-gray-200'
@@ -1474,11 +1471,11 @@ export const InspectorColumn: React.FC<InspectorColumnProps> = ({
             </div>
 
             {/* Kind Filter: All / Spell Check / Grammar Check */}
-            <div className="grid grid-cols-3 p-0.5 bg-[#151515] rounded border border-[#3a3a3a] tabular-nums">
+            <div className="flex flex-wrap gap-1 p-0.5 bg-[#151515] rounded border border-[#3a3a3a] tabular-nums">
               <button
                 type="button"
                 onClick={() => setProofreadFilter('all')}
-                className={`py-1 rounded text-[10px] font-medium transition-colors ${
+                className={`flex-1 min-w-fit px-2 py-1 rounded text-[10px] font-medium transition-colors whitespace-nowrap ${
                   proofreadFilter === 'all'
                     ? 'bg-[#2d2d2d] text-white'
                     : 'text-gray-400 hover:text-gray-200'
@@ -1489,7 +1486,7 @@ export const InspectorColumn: React.FC<InspectorColumnProps> = ({
               <button
                 type="button"
                 onClick={() => setProofreadFilter('spelling')}
-                className={`py-1 rounded text-[10px] font-medium transition-colors ${
+                className={`flex-1 min-w-fit px-2 py-1 rounded text-[10px] font-medium transition-colors whitespace-nowrap ${
                   proofreadFilter === 'spelling'
                     ? 'bg-[#2d2d2d] text-amber-300'
                     : 'text-gray-400 hover:text-gray-200'
@@ -1500,7 +1497,7 @@ export const InspectorColumn: React.FC<InspectorColumnProps> = ({
               <button
                 type="button"
                 onClick={() => setProofreadFilter('grammar')}
-                className={`py-1 rounded text-[10px] font-medium transition-colors ${
+                className={`flex-1 min-w-fit px-2 py-1 rounded text-[10px] font-medium transition-colors whitespace-nowrap ${
                   proofreadFilter === 'grammar'
                     ? 'bg-[#2d2d2d] text-cyan-300'
                     : 'text-gray-400 hover:text-gray-200'

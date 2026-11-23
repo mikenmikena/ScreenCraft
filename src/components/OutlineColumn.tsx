@@ -348,34 +348,34 @@ export const OutlineColumn: React.FC<OutlineColumnProps> = ({
         )}
       </div>
 
-      {/* Column Tab Headers */}
-      <div className="grid grid-cols-3 border-b border-[#383838] bg-[#1c1c1c] text-[11px]">
+      {/* Column Tab Headers (wraps cleanly onto a second row if exceeding pane width) */}
+      <div className="flex flex-wrap gap-1 p-1.5 border-b border-[#383838] bg-[#1c1c1c] text-[11px]">
         <button
           onClick={() => setTab('outline')}
-          className={`py-2 px-1.5 text-center font-semibold tracking-wider transition-colors border-r border-[#333] whitespace-nowrap truncate ${
+          className={`flex-1 min-w-fit py-1.5 px-2 rounded text-center font-semibold tracking-wider transition-colors border whitespace-nowrap ${
             tab === 'outline'
-              ? 'bg-[#242424] text-[#ff8000] border-t-2 border-t-[#ff8000]'
-              : 'text-gray-400 hover:text-gray-200 hover:bg-[#222]'
+              ? 'bg-[#242424] text-[#ff8000] border-[#ff8000]/60'
+              : 'text-gray-400 hover:text-gray-200 hover:bg-[#222] border-transparent'
           }`}
         >
           Outline
         </button>
         <button
           onClick={() => setTab('strip_properties')}
-          className={`py-2 px-1.5 text-center font-semibold tracking-wider transition-colors border-r border-[#333] whitespace-nowrap truncate ${
+          className={`flex-1 min-w-fit py-1.5 px-2 rounded text-center font-semibold tracking-wider transition-colors border whitespace-nowrap ${
             tab === 'strip_properties'
-              ? 'bg-[#242424] text-[#ff8000] border-t-2 border-t-[#ff8000]'
-              : 'text-gray-400 hover:text-gray-200 hover:bg-[#222]'
+              ? 'bg-[#242424] text-[#ff8000] border-[#ff8000]/60'
+              : 'text-gray-400 hover:text-gray-200 hover:bg-[#222] border-transparent'
           }`}
         >
           Properties
         </button>
         <button
           onClick={() => setTab('cast')}
-          className={`py-2 px-1.5 text-center font-semibold tracking-wider transition-colors whitespace-nowrap truncate ${
+          className={`flex-1 min-w-fit py-1.5 px-2 rounded text-center font-semibold tracking-wider transition-colors border whitespace-nowrap ${
             tab === 'cast'
-              ? 'bg-[#242424] text-[#ff8000] border-t-2 border-t-[#ff8000]'
-              : 'text-gray-400 hover:text-gray-200 hover:bg-[#222]'
+              ? 'bg-[#242424] text-[#ff8000] border-[#ff8000]/60'
+              : 'text-gray-400 hover:text-gray-200 hover:bg-[#222] border-transparent'
           }`}
         >
           Cast ({characters.length})

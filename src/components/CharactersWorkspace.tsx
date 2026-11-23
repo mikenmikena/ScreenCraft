@@ -335,7 +335,7 @@ export const CharactersWorkspace: React.FC<CharactersWorkspaceProps> = ({
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center p-0.5 bg-[#161618] border border-[#383840] rounded">
+          <div className="flex flex-wrap items-center gap-0.5 p-0.5 bg-[#161618] border border-[#383840] rounded">
             <button
               type="button"
               onClick={() => setSubView('details')}

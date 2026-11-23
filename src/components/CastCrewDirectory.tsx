@@ -911,7 +911,7 @@ export const CastCrewDirectory: React.FC<CastCrewDirectoryProps> = ({
               </div>
 
               {/* Segmented Cast / Crew Filter */}
-              <div className="flex items-center p-0.5 bg-[#171717] rounded border border-[#383838]">
+              <div className="flex flex-wrap items-center gap-0.5 p-0.5 bg-[#171717] rounded border border-[#383838]">
                 {(['all', 'cast', 'crew'] as const).map((cat) => (
                   <button
                     key={cat}

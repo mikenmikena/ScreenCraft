@@ -204,14 +204,14 @@ export const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
   return (
     <div className="bg-[#2e2e2e] border-b border-[#3e3e3e] flex flex-col text-xs select-none">
       {/* Document Tab Bar + Panel Collapse Controls */}
-      <div className="flex items-center justify-between px-2 bg-[#222222] border-b border-[#383838] h-7 gap-2">
+      <div className="flex flex-wrap items-center justify-between px-2 py-0.5 bg-[#222222] border-b border-[#383838] min-h-7 gap-2">
         <div className="flex items-center bg-[#2e2e2e] text-gray-200 px-3 py-1 rounded-t border-t-2 border-[#ff7700] text-xs font-medium space-x-2 min-w-0">
           <span className="truncate">{isModified ? `*${documentTitle}` : documentTitle}</span>
           <span className="text-[10px] text-gray-500 hover:text-white cursor-pointer ml-1">×</span>
         </div>
 
         {(onToggleLeftPanel || onToggleRightPanel || onToggleFocusCenter) && (
-          <div className="flex items-center gap-1 text-[11px] shrink-0">
+          <div className="flex flex-wrap items-center gap-1 text-[11px] min-w-0">
             {onToggleLeftPanel && (
               <button
                 type="button"
@@ -293,10 +293,10 @@ export const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
         )}
       </div>
 
-      {/* Main Formatting & Action Ribbon */}
-      <div className="flex items-center justify-between px-3 py-1.5 min-h-[40px] gap-2 overflow-x-auto">
+      {/* Main Formatting & Action Ribbon (wraps onto a second row cleanly if exceeding pane width) */}
+      <div className="flex flex-wrap items-center justify-between px-3 py-1.5 min-h-[40px] gap-2">
         {/* Left Side: Element Formatting, Typography, Styles, Alignment & Line Spacing */}
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex flex-wrap items-center gap-1.5 min-w-0">
           {/* Elements Shortcut Menu Trigger + Format Dropdown */}
           <div className="flex items-center bg-[#1e1e1e] border border-[#444444] rounded px-1.5 py-0.5 gap-1">
             {isAuthoring && onOpenElementsPopup && (
@@ -574,7 +574,7 @@ export const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
         </div>
 
         {/* Right Side: Script Format, Sync, Continuity, NLE Pipeline & Zoom */}
-        <div className="flex items-center space-x-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
           {isAuthoring && onChangeScriptFormat && (
             <div className="flex items-center p-0.5 bg-[#1b1b1b] border border-[#444444] rounded">
               <button

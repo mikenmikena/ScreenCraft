@@ -206,7 +206,7 @@ export const StoryboardWorkspace: React.FC<StoryboardWorkspaceProps> = ({
     <div className="flex-1 bg-[#1a1a1a] text-gray-200 overflow-y-auto flex flex-col select-none text-xs">
       {/* Storyboard Top Ribbon Bar */}
       <div className="bg-[#262626] border-b border-[#3e3e3e] px-4 py-2 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center space-x-3">
+        <div className="flex flex-wrap items-center gap-3 min-w-0">
           <div className="flex items-center space-x-1.5 text-amber-400 font-bold text-xs uppercase tracking-wider">
             <Film className="w-4 h-4 text-[#ff7700]" />
             <span>Production Storyboard & Pre-Vis</span>
@@ -261,7 +261,7 @@ export const StoryboardWorkspace: React.FC<StoryboardWorkspaceProps> = ({
         </div>
 
         {/* Action Controls */}
-        <div className="flex items-center space-x-2">
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
           {/* Animatic Play Button */}
           <button
             onClick={() => {
