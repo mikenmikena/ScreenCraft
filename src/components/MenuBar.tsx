@@ -50,6 +50,8 @@ import {
   CheckSquare,
   Maximize2,
   Minimize2,
+  Captions,
+  UserCheck,
 } from 'lucide-react';
 import { ActiveWorkspace, ElementType } from '../types/story';
 import { DocumentTemplateKind } from '../utils/projectTemplates';
@@ -60,7 +62,7 @@ export type AuthoringViewMode = 'normal' | 'simple' | 'page';
 interface MenuBarProps {
   activeWorkspace: ActiveWorkspace;
   onSelectWorkspace: (workspace: ActiveWorkspace) => void;
-  onExport: (format: 'pdf' | 'fdx' | 'fountain' | 'json' | 'csv') => void;
+  onExport: (format: 'pdf' | 'fdx' | 'fountain' | 'srt' | 'vtt' | 'json' | 'csv') => void;
   onNewDocument?: (kind?: DocumentTemplateKind) => void;
   onOpenFromDevice?: () => void;
   onSave: () => void;
@@ -75,6 +77,7 @@ interface MenuBarProps {
   onRecalculate: () => void;
   onAddDayBreak?: () => void;
   onAddComment?: () => void;
+  onOpenCastingStudio?: () => void;
   onOpenCastCrew?: () => void;
   onOpenCharacterBreakdown?: () => void;
   onOpenCallSheet?: () => void;
@@ -85,6 +88,7 @@ interface MenuBarProps {
   onOpenContinuityCheck?: () => void;
   continuityAlertCount?: number;
   onOpenHelpGuide?: (category?: HelpSectionCategory, toolId?: string) => void;
+  onDownloadHelpPdf?: () => void;
   // Edit Menu Actions
   onSelectAll?: () => void;
   onSelectScene?: () => void;
@@ -132,6 +136,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
   onRecalculate,
   onAddDayBreak,
   onAddComment,
+  onOpenCastingStudio,
   onOpenCastCrew,
   onOpenCharacterBreakdown,
   onOpenCallSheet,
@@ -142,6 +147,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
   onOpenContinuityCheck,
   continuityAlertCount = 0,
   onOpenHelpGuide,
+  onDownloadHelpPdf,
   onSelectAll,
   onSelectScene,
   onCut,
@@ -415,6 +421,28 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                     >
                       <FileText className="w-3.5 h-3.5 text-emerald-400" />
                       <span>Fountain (.fountain)...</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onExport('srt');
+                        closeAllMenus();
+                      }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 transition-colors"
+                    >
+                      <Captions className="w-3.5 h-3.5 text-amber-300" />
+                      <span>Subtitles (.srt)...</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onExport('vtt');
+                        closeAllMenus();
+                      }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 transition-colors"
+                    >
+                      <Captions className="w-3.5 h-3.5 text-cyan-300" />
+                      <span>WebVTT Subtitles (.vtt)...</span>
                     </button>
                     <button
                       type="button"
@@ -887,6 +915,18 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                 <FileSpreadsheet className="w-3.5 h-3.5 text-cyan-400" />
                 <span>Generate Production Stripboard</span>
               </button>
+              {onOpenCastingStudio && (
+                <button
+                  onClick={() => {
+                    onOpenCastingStudio();
+                    setOpenMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs"
+                >
+                  <UserCheck className="w-3.5 h-3.5 text-[#ff8000]" />
+                  <span>Casting Studio &amp; Auditions...</span>
+                </button>
+              )}
               {onOpenCastCrew && (
                 <button
                   onClick={() => {
@@ -1163,6 +1203,18 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                 <HelpCircle className="w-3.5 h-3.5 text-[#ff8000]" />
                 <span>Interactive Tool Guide...</span>
               </button>
+              {onDownloadHelpPdf && (
+                <button
+                  onClick={() => {
+                    onDownloadHelpPdf();
+                    setOpenMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-1.5 hover:bg-[#ff7700] hover:text-white flex items-center space-x-2 text-xs font-semibold text-amber-300"
+                >
+                  <Download className="w-3.5 h-3.5 text-amber-300" />
+                  <span>Download PDF User Manual (Illustrated)</span>
+                </button>
+              )}
 
               <div className="h-px bg-[#333333] my-1"></div>
 
@@ -1263,6 +1315,9 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             </option>
             <option value="teleprompter" className="bg-[#222] text-gray-200">
               Teleprompter
+            </option>
+            <option value="subtitles" className="bg-[#222] text-gray-200">
+              Subtitles
             </option>
             <option value="projects" className="bg-[#222] text-gray-200">
               Home (Authoring &amp; Production)

@@ -20,7 +20,13 @@ import {
   Check,
   Film,
   Tag as TagIcon,
+  Camera,
+  Upload,
+  Image as ImageIcon,
+  X,
+  Maximize2,
 } from 'lucide-react';
+import { processUploadedImageFile } from '../utils/imageUpload';
 
 interface CharactersWorkspaceProps {
   project: StoryProject;
@@ -91,6 +97,10 @@ export const CharactersWorkspace: React.FC<CharactersWorkspaceProps> = ({
   const [newCharActor, setNewCharActor] = useState('');
   const [newCharRole, setNewCharRole] = useState<CharacterBio['roleType']>('Supporting');
   const [newCharDesc, setNewCharDesc] = useState('');
+  const [newCharImage, setNewCharImage] = useState<string>('');
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [isDragOverPortrait, setIsDragOverPortrait] = useState(false);
+  const [lightboxImage, setLightboxImage] = useState<{ src: string; caption: string } | null>(null);
 
   React.useEffect(() => {
     setSubView(initialSubView);
@@ -153,6 +163,8 @@ export const CharactersWorkspace: React.FC<CharactersWorkspaceProps> = ({
           color: charRec?.color || CHARACTER_COLORS[idx % CHARACTER_COLORS.length],
           actor: charRec?.actor || '',
           description: charRec?.description || bioRec?.loglineSummary || '',
+          image: charRec?.image || tagEntry?.image || '',
+          referenceImages: charRec?.referenceImages || [],
           charRec,
           bioRec,
           breakdownRec,
@@ -259,6 +271,42 @@ export const CharactersWorkspace: React.FC<CharactersWorkspaceProps> = ({
     setSelectedCharName(nextUpper);
   };
 
+  const handleUploadPrimaryPortrait = async (nameUpper: string, file: File) => {
+    try {
+      setUploadError(null);
+      const dataUrl = await processUploadedImageFile(file, 720);
+      ensureStoryCharacter(nameUpper, { image: dataUrl });
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : 'Unable to upload image.');
+    }
+  };
+
+  const handleUploadReferenceImages = async (
+    nameUpper: string,
+    existingRefs: string[],
+    files: FileList | File[]
+  ) => {
+    try {
+      setUploadError(null);
+      const fileArr = Array.from(files).slice(0, 6);
+      const encoded: string[] = [];
+      for (const file of fileArr) {
+        if (file.type.startsWith('image/')) {
+          encoded.push(await processUploadedImageFile(file, 720));
+        }
+      }
+      if (encoded.length === 0) {
+        setUploadError('Please select valid image files (PNG, JPG, WebP, GIF).');
+        return;
+      }
+      ensureStoryCharacter(nameUpper, {
+        referenceImages: [...existingRefs, ...encoded],
+      });
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : 'Unable to upload reference image.');
+    }
+  };
+
   const handleCreateNewCharacter = (e: React.FormEvent) => {
     e.preventDefault();
     const upper = newCharName.trim().toUpperCase();
@@ -266,6 +314,7 @@ export const CharactersWorkspace: React.FC<CharactersWorkspaceProps> = ({
     ensureStoryCharacter(upper, {
       actor: newCharActor.trim() || undefined,
       description: newCharDesc.trim() || undefined,
+      image: newCharImage || undefined,
       color: CHARACTER_COLORS[project.characters.length % CHARACTER_COLORS.length],
     });
     upsertCharacterBio(upper, {
@@ -276,6 +325,7 @@ export const CharactersWorkspace: React.FC<CharactersWorkspaceProps> = ({
     setNewCharName('');
     setNewCharActor('');
     setNewCharDesc('');
+    setNewCharImage('');
     setIsAddingChar(false);
   };
 
@@ -457,8 +507,45 @@ export const CharactersWorkspace: React.FC<CharactersWorkspaceProps> = ({
                   >
                     <div className="flex items-start justify-between gap-3 pb-2.5 border-b border-[#2e2e36]">
                       <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        <label
+                          className="relative w-10 h-10 rounded-lg overflow-hidden bg-[#151517] border border-[#3a3a44] flex items-center justify-center shrink-0 cursor-pointer group"
+                          title="Upload character portrait"
+                        >
+                          {charRec?.image ? (
+                            <img
+                              src={charRec.image}
+                              alt={bio.characterName}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <span
+                              className="text-xs font-bold"
+                              style={{ color: charRec?.color || '#f59e0b' }}
+                            >
+                              {bio.characterName.slice(0, 2).toUpperCase()}
+                            </span>
+                          )}
+                          <span className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                            <Camera className="w-3.5 h-3.5 text-white" />
+                          </span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                void handleUploadPrimaryPortrait(
+                                  bio.characterName.trim().toUpperCase(),
+                                  file
+                                );
+                              }
+                              e.target.value = '';
+                            }}
+                          />
+                        </label>
                         <span
-                          className="w-3 h-3 rounded-full shrink-0"
+                          className="w-2.5 h-2.5 rounded-full shrink-0"
                           style={{ backgroundColor: charRec?.color || '#f59e0b' }}
                         />
                         <input
@@ -632,26 +719,43 @@ export const CharactersWorkspace: React.FC<CharactersWorkspaceProps> = ({
                       isSelected ? 'bg-[#27272d]' : 'hover:bg-[#222227]'
                     }`}
                   >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span
-                          className="w-2.5 h-2.5 rounded-full shrink-0"
-                          style={{ backgroundColor: ch.color }}
-                        />
-                        <span
-                          className={`font-bold truncate ${
-                            isSelected ? 'text-[#ff8000]' : 'text-gray-100'
-                          }`}
-                        >
-                          {ch.name}
-                        </span>
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div
+                        className="w-9 h-9 rounded-full overflow-hidden bg-[#151517] border flex items-center justify-center shrink-0"
+                        style={{ borderColor: ch.color }}
+                      >
+                        {ch.image ? (
+                          <img
+                            src={ch.image}
+                            alt={ch.name}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <span
+                            className="text-[11px] font-bold"
+                            style={{ color: ch.color }}
+                          >
+                            {ch.name.slice(0, 2).toUpperCase()}
+                          </span>
+                        )}
                       </div>
-                      <div className="text-[11px] text-gray-400 truncate mt-0.5">
-                        {ch.bioRec?.roleType || ch.breakdownRec?.roleCategory || 'Cast'}
-                        {ch.actor ? ` · ${ch.actor}` : ''}
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={`font-bold truncate ${
+                              isSelected ? 'text-[#ff8000]' : 'text-gray-100'
+                            }`}
+                          >
+                            {ch.name}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-gray-400 truncate mt-0.5">
+                          {ch.bioRec?.roleType || ch.breakdownRec?.roleCategory || 'Cast'}
+                          {ch.actor ? ` · ${ch.actor}` : ''}
+                        </div>
                       </div>
                     </div>
-                    <span className="text-[10px] font-mono text-gray-400 tabular-nums shrink-0">
+                    <span className="text-[10px] font-mono text-gray-400 tabular-nums shrink-0 self-center">
                       {ch.scenesCount}sc · {ch.dialogueCount}dl
                     </span>
                   </button>
@@ -678,22 +782,70 @@ export const CharactersWorkspace: React.FC<CharactersWorkspaceProps> = ({
               <div className="max-w-4xl mx-auto space-y-5">
                 {/* Header & Script Presence Summary */}
                 <div className="bg-[#1e1e22] border border-[#33333b] rounded-lg p-5 flex flex-wrap items-start justify-between gap-4">
-                  <div className="space-y-1 min-w-0 flex-1">
-                    <div className="flex items-center gap-2.5">
-                      <span
-                        className="w-3.5 h-3.5 rounded-full shrink-0"
-                        style={{ backgroundColor: activeProfile.color }}
-                      />
-                      <h2 className="text-lg font-bold text-gray-100 truncate">
-                        {activeProfile.name}
-                      </h2>
+                  <div className="flex items-center gap-4 min-w-0 flex-1">
+                    <div
+                      className="relative w-16 h-16 rounded-xl overflow-hidden bg-[#141416] border-2 flex items-center justify-center shrink-0 group"
+                      style={{ borderColor: activeProfile.color }}
+                    >
+                      {activeProfile.image ? (
+                        <>
+                          <img
+                            src={activeProfile.image}
+                            alt={activeProfile.name}
+                            onClick={() =>
+                              setLightboxImage({
+                                src: activeProfile.image,
+                                caption: `${activeProfile.name} — Character Portrait`,
+                              })
+                            }
+                            className="w-full h-full object-cover cursor-pointer"
+                          />
+                        </>
+                      ) : (
+                        <span
+                          className="text-lg font-bold tracking-wider"
+                          style={{ color: activeProfile.color }}
+                        >
+                          {activeProfile.name.slice(0, 2).toUpperCase()}
+                        </span>
+                      )}
+                      <label
+                        className="absolute inset-0 bg-black/65 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center cursor-pointer transition-opacity text-[10px] text-white font-medium gap-0.5"
+                        title="Upload character portrait"
+                      >
+                        <Camera className="w-4 h-4 text-[#ff8000]" />
+                        <span>Upload</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) void handleUploadPrimaryPortrait(activeProfile.name, file);
+                            e.target.value = '';
+                          }}
+                        />
+                      </label>
                     </div>
-                    <div className="text-xs text-gray-400 tabular-nums">
-                      {activeProfile.scenesCount} Script Scenes · {activeProfile.dialogueCount}{' '}
-                      Dialogue Lines
-                      {activeProfile.voiceOverCount > 0
-                        ? ` · ${activeProfile.voiceOverCount} Voice-over Cues`
-                        : ''}
+
+                    <div className="space-y-1 min-w-0 flex-1">
+                      <div className="flex items-center gap-2.5">
+                        <span
+                          className="w-3 h-3 rounded-full shrink-0"
+                          style={{ backgroundColor: activeProfile.color }}
+                        />
+                        <h2 className="text-lg font-bold text-gray-100 truncate">
+                          {activeProfile.name}
+                        </h2>
+                      </div>
+                      <div className="text-xs text-gray-400 tabular-nums">
+                        {activeProfile.scenesCount} Script Scenes · {activeProfile.dialogueCount}{' '}
+                        Dialogue Lines
+                        {activeProfile.voiceOverCount > 0
+                          ? ` · ${activeProfile.voiceOverCount} Voice-over Cues`
+                          : ''}
+                        {activeProfile.actor ? ` · Cast: ${activeProfile.actor}` : ''}
+                      </div>
                     </div>
                   </div>
 
@@ -737,6 +889,211 @@ export const CharactersWorkspace: React.FC<CharactersWorkspaceProps> = ({
                       <Trash2 className="w-3.5 h-3.5" />
                       <span>Remove</span>
                     </button>
+                  </div>
+                </div>
+
+                {/* Character Portrait & Visual Reference Images */}
+                <div className="bg-[#1e1e22] border border-[#33333b] rounded-lg p-5 space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-gray-300 flex items-center gap-1.5">
+                        <ImageIcon className="w-3.5 h-3.5 text-[#ff8000]" />
+                        <span>Character Portrait &amp; Visual Reference Images</span>
+                      </h3>
+                      <p className="text-[11px] text-gray-400 mt-0.5">
+                        Upload a primary character portrait and lookbook reference images synced to Cast Gallery &amp; Casting Studio.
+                      </p>
+                    </div>
+                    {uploadError && (
+                      <span className="text-[11px] text-rose-400 font-medium">{uploadError}</span>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-[220px_1fr] gap-5 items-start">
+                    {/* Primary Portrait Dropzone */}
+                    <div
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        setIsDragOverPortrait(true);
+                      }}
+                      onDragLeave={() => setIsDragOverPortrait(false)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setIsDragOverPortrait(false);
+                        const file = e.dataTransfer.files?.[0];
+                        if (file) void handleUploadPrimaryPortrait(activeProfile.name, file);
+                      }}
+                      className={`rounded-lg border-2 border-dashed p-3 flex flex-col items-center justify-center text-center transition-colors bg-[#151517] ${
+                        isDragOverPortrait
+                          ? 'border-[#ff8000] bg-[#2a1f14]'
+                          : 'border-[#35353f] hover:border-[#52525f]'
+                      }`}
+                    >
+                      {activeProfile.image ? (
+                        <div className="w-full space-y-2.5">
+                          <div className="relative aspect-[4/3] w-full rounded-md overflow-hidden border border-[#34343c] bg-[#101012] group">
+                            <img
+                              src={activeProfile.image}
+                              alt={`${activeProfile.name} portrait`}
+                              className="w-full h-full object-cover"
+                            />
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setLightboxImage({
+                                  src: activeProfile.image,
+                                  caption: `${activeProfile.name} — Character Portrait`,
+                                })
+                              }
+                              className="absolute top-1.5 right-1.5 p-1 rounded bg-black/70 text-gray-200 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                              title="View full image"
+                            >
+                              <Maximize2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <label className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 bg-[#26262c] hover:bg-[#32323a] border border-[#3c3c46] text-gray-200 rounded cursor-pointer font-medium text-[11px]">
+                              <Upload className="w-3 h-3 text-[#ff8000]" />
+                              <span>Replace</span>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) void handleUploadPrimaryPortrait(activeProfile.name, file);
+                                  e.target.value = '';
+                                }}
+                              />
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => ensureStoryCharacter(activeProfile.name, { image: undefined })}
+                              className="px-2.5 py-1.5 bg-[#26262c] hover:bg-rose-950/60 border border-[#3c3c46] hover:border-rose-700 text-rose-300 rounded text-[11px]"
+                              title="Remove portrait"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <label className="w-full py-5 px-2 flex flex-col items-center justify-center cursor-pointer space-y-2">
+                          <div className="w-11 h-11 rounded-full bg-[#222228] border border-[#3a3a44] flex items-center justify-center text-[#ff8000]">
+                            <Camera className="w-5 h-5" />
+                          </div>
+                          <div className="space-y-0.5">
+                            <p className="text-xs font-semibold text-gray-200">
+                              Upload Character Portrait
+                            </p>
+                            <p className="text-[10px] text-gray-500">
+                              Click or drag PNG, JPG, WebP
+                            </p>
+                          </div>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) void handleUploadPrimaryPortrait(activeProfile.name, file);
+                              e.target.value = '';
+                            }}
+                          />
+                        </label>
+                      )}
+                    </div>
+
+                    {/* Additional Reference / Lookbook Gallery */}
+                    <div className="space-y-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-medium text-gray-300">
+                          Lookbook / Wardrobe / Casting Reference Photos ({activeProfile.referenceImages.length})
+                        </span>
+                        <label className="flex items-center gap-1.5 px-2.5 py-1 bg-[#26262c] hover:bg-[#32323a] border border-[#3c3c46] text-amber-300 rounded cursor-pointer font-medium text-[11px]">
+                          <Plus className="w-3 h-3" />
+                          <span>Add Reference Images</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            multiple
+                            className="hidden"
+                            onChange={(e) => {
+                              if (e.target.files && e.target.files.length > 0) {
+                                void handleUploadReferenceImages(
+                                  activeProfile.name,
+                                  activeProfile.referenceImages,
+                                  e.target.files
+                                );
+                              }
+                              e.target.value = '';
+                            }}
+                          />
+                        </label>
+                      </div>
+
+                      {activeProfile.referenceImages.length === 0 ? (
+                        <label className="flex flex-col items-center justify-center py-8 px-4 rounded-lg border border-dashed border-[#34343d] bg-[#151517] hover:border-[#4c4c58] cursor-pointer text-center space-y-1.5">
+                          <Upload className="w-4 h-4 text-gray-500" />
+                          <span className="text-[11px] text-gray-400">
+                            No wardrobe, makeup, or visual inspiration photos attached yet.
+                          </span>
+                          <span className="text-[10px] text-gray-500">
+                            Click to attach one or more reference images for costume &amp; casting teams.
+                          </span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            multiple
+                            className="hidden"
+                            onChange={(e) => {
+                              if (e.target.files && e.target.files.length > 0) {
+                                void handleUploadReferenceImages(
+                                  activeProfile.name,
+                                  activeProfile.referenceImages,
+                                  e.target.files
+                                );
+                              }
+                              e.target.value = '';
+                            }}
+                          />
+                        </label>
+                      ) : (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
+                          {activeProfile.referenceImages.map((src, idx) => (
+                            <div
+                              key={`${activeProfile.name}-ref-${idx}`}
+                              className="relative aspect-square rounded-md overflow-hidden border border-[#34343c] bg-[#151517] group"
+                            >
+                              <img
+                                src={src}
+                                alt={`${activeProfile.name} reference ${idx + 1}`}
+                                onClick={() =>
+                                  setLightboxImage({
+                                    src,
+                                    caption: `${activeProfile.name} — Reference #${idx + 1}`,
+                                  })
+                                }
+                                className="w-full h-full object-cover cursor-pointer"
+                              />
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  ensureStoryCharacter(activeProfile.name, {
+                                    referenceImages: activeProfile.referenceImages.filter(
+                                      (_, i) => i !== idx
+                                    ),
+                                  })
+                                }
+                                className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/75 hover:bg-rose-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                                title="Remove reference image"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -1038,6 +1395,55 @@ export const CharactersWorkspace: React.FC<CharactersWorkspaceProps> = ({
 
             <div>
               <label className="block text-[11px] text-gray-400 mb-1">
+                Character Portrait (Optional)
+              </label>
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-lg overflow-hidden bg-[#161618] border border-[#3a3a42] flex items-center justify-center shrink-0">
+                  {newCharImage ? (
+                    <img
+                      src={newCharImage}
+                      alt="New character portrait"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <Camera className="w-4 h-4 text-gray-500" />
+                  )}
+                </div>
+                <label className="flex items-center gap-1.5 px-3 py-1.5 bg-[#2a2a32] hover:bg-[#34343e] border border-[#3e3e48] rounded text-xs text-gray-200 cursor-pointer">
+                  <Upload className="w-3.5 h-3.5 text-[#ff8000]" />
+                  <span>{newCharImage ? 'Change Image' : 'Upload Image'}</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        try {
+                          const dataUrl = await processUploadedImageFile(file, 720);
+                          setNewCharImage(dataUrl);
+                        } catch {
+                          // ignore invalid selection
+                        }
+                      }
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+                {newCharImage && (
+                  <button
+                    type="button"
+                    onClick={() => setNewCharImage('')}
+                    className="text-[11px] text-rose-400 hover:underline"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[11px] text-gray-400 mb-1">
                 Summary / Bio Lead-in
               </label>
               <textarea
@@ -1052,7 +1458,10 @@ export const CharactersWorkspace: React.FC<CharactersWorkspaceProps> = ({
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#32323a]">
               <button
                 type="button"
-                onClick={() => setIsAddingChar(false)}
+                onClick={() => {
+                  setNewCharImage('');
+                  setIsAddingChar(false);
+                }}
                 className="px-3 py-1.5 bg-[#2d2d34] hover:bg-[#383840] text-gray-200 rounded"
               >
                 Cancel
@@ -1065,6 +1474,37 @@ export const CharactersWorkspace: React.FC<CharactersWorkspaceProps> = ({
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* Image Lightbox Modal */}
+      {lightboxImage && (
+        <div
+          className="fixed inset-0 bg-black/85 backdrop-blur-xs flex items-center justify-center p-6 z-50"
+          onClick={() => setLightboxImage(null)}
+        >
+          <div
+            className="max-w-3xl w-full bg-[#1b1b1f] border border-[#3a3a44] rounded-xl overflow-hidden shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 py-2.5 bg-[#232328] border-b border-[#34343d] flex items-center justify-between">
+              <span className="text-xs font-semibold text-gray-200">{lightboxImage.caption}</span>
+              <button
+                type="button"
+                onClick={() => setLightboxImage(null)}
+                className="p-1 text-gray-400 hover:text-white rounded"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4 flex items-center justify-center bg-[#101012] max-h-[78vh]">
+              <img
+                src={lightboxImage.src}
+                alt={lightboxImage.caption}
+                className="max-h-[72vh] max-w-full object-contain rounded"
+              />
+            </div>
+          </div>
         </div>
       )}
     </div>

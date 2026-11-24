@@ -25,6 +25,8 @@ import {
   EquipmentItem,
   FinanceSettings,
   StoryCharacter,
+  CastingCandidate,
+  CastingRoleOverride,
 } from './types/story';
 import {
   DEFAULT_EDITOR_TYPOGRAPHY,
@@ -64,10 +66,16 @@ import { ReportsModal } from './components/ReportsModal';
 import { NLEMetadataModal } from './components/NLEMetadataModal';
 import { RevisionImpactModal } from './components/RevisionImpactModal';
 import { TeleprompterWindow } from './components/TeleprompterWindow';
+import { SubtitlesWorkspace } from './components/SubtitlesWorkspace';
 import { SceneContinuityModal } from './components/SceneContinuityModal';
 import { HelpGuideModal, HelpSectionCategory } from './components/HelpGuideModal';
 import { QuickNotesSidebar } from './components/QuickNotesSidebar';
 import { parseFountain } from './utils/screenplayParser';
+import {
+  buildScreenplayDataFromCues,
+  SubtitleCue,
+  SubtitleToScriptOptions,
+} from './utils/subtitleUtils';
 import { analyzeScriptProofreading } from './utils/scriptProofreading';
 import { generateRustDesktopZip } from './utils/rustDesktopGenerator';
 import {
@@ -92,6 +100,7 @@ import {
 } from './utils/sccrftFileFormat';
 import { ExportFormatType } from './utils/exportPreviewFormatter';
 import { printScreenplayDocument } from './utils/printHelper';
+import { downloadHelpManualPdf } from './utils/helpManualPdfGenerator';
 import { Upload, X, Clock, Save, CheckCircle, Download, BookmarkPlus } from 'lucide-react';
 
 const STORAGE_KEY_PROJECTS = 'adobe_story_projects_v1';
@@ -2211,6 +2220,163 @@ export default function App() {
     showToast(`Imported ${created.length} script cast member(s) into Address Book`);
   };
 
+  const handleUpdateCastingCandidates = (castingCandidates: CastingCandidate[]) => {
+    updateCurrentProject((proj) => ({
+      ...proj,
+      castingCandidates,
+      lastModified: 'Just now',
+    }));
+  };
+
+  const handleUpdateCastingRoleOverrides = (castingRoleOverrides: CastingRoleOverride[]) => {
+    updateCurrentProject((proj) => ({
+      ...proj,
+      castingRoleOverrides,
+      lastModified: 'Just now',
+    }));
+  };
+
+  const handleCastActorToRole = (
+    characterName: string,
+    candidate: {
+      actorName: string;
+      headshotUrl?: string;
+      agentOrRep?: string;
+      email?: string;
+      phone?: string;
+      unionStatus?: string;
+      dayRateEstimate?: number;
+    }
+  ) => {
+    const upperRole = characterName.trim().toUpperCase();
+    const actorClean = candidate.actorName.trim();
+    if (!upperRole || !actorClean) return;
+
+    updateCurrentProject((proj) => {
+      const charExists = proj.characters.some(
+        (c) => c.name.trim().toUpperCase() === upperRole
+      );
+      const matchedSceneIds = proj.scenes
+        .filter((sc) =>
+          sc.characters.some((ch) => ch.trim().toUpperCase() === upperRole)
+        )
+        .map((sc) => sc.id);
+
+      const nextCharacters = charExists
+        ? proj.characters.map((c) =>
+            c.name.trim().toUpperCase() === upperRole
+              ? { ...c, actor: actorClean, status: 'Cast' }
+              : c
+          )
+        : [
+            ...proj.characters,
+            {
+              name: upperRole,
+              color: '#f59e0b',
+              actor: actorClean,
+              scenesCount: matchedSceneIds.length,
+              speakingLines: 0,
+              status: 'Cast',
+            },
+          ];
+
+      const existingMembers = proj.crewMembers || [];
+      const memberIdx = existingMembers.findIndex(
+        (m) =>
+          m.category === 'cast' &&
+          (m.characterName || '').trim().toUpperCase() === upperRole
+      );
+
+      let nextCrewMembers: CastCrewMember[];
+      if (memberIdx >= 0) {
+        nextCrewMembers = existingMembers.map((m, idx) =>
+          idx === memberIdx
+            ? {
+                ...m,
+                name: actorClean,
+                avatarUrl: candidate.headshotUrl || m.avatarUrl,
+                agencyOrCompany: candidate.agentOrRep || m.agencyOrCompany,
+                email: candidate.email || m.email,
+                phone: candidate.phone || m.phone,
+                unionStatus: candidate.unionStatus || m.unionStatus,
+                payRate: candidate.dayRateEstimate ?? m.payRate,
+                availabilityStatus: 'Confirmed',
+              }
+            : m
+        );
+      } else {
+        const newCastMember: CastCrewMember = {
+          id: `cm-cast-${Date.now()}`,
+          name: actorClean,
+          category: 'cast',
+          department: 'Cast / Principal',
+          role: `Cast — ${upperRole}`,
+          characterName: upperRole,
+          unionStatus: candidate.unionStatus || 'SAG-AFTRA',
+          avatarUrl: candidate.headshotUrl,
+          email:
+            candidate.email ||
+            `${actorClean.toLowerCase().replace(/[^a-z0-9]+/g, '.')}@cast.example`,
+          phone: candidate.phone || 'Pending',
+          agencyOrCompany: candidate.agentOrRep,
+          preferredContact: 'Email',
+          payRate: candidate.dayRateEstimate || 1200,
+          payBasis: 'Daily',
+          currency: 'USD',
+          paymentStatus: 'Pending Deal Memo',
+          callTime: '07:00',
+          wrapTime: '19:00',
+          scheduledDays: ['Day 1'],
+          linkedSceneIds: matchedSceneIds,
+          availabilityStatus: 'Confirmed',
+          scheduleNotes: `Cast via Casting Studio for ${upperRole}.`,
+          connections: [],
+        };
+        nextCrewMembers = [newCastMember, ...existingMembers];
+      }
+
+      const prevOverrides = proj.castingRoleOverrides || [];
+      const hasOverride = prevOverrides.some(
+        (o) => o.characterName.trim().toUpperCase() === upperRole
+      );
+      const nextOverrides = hasOverride
+        ? prevOverrides.map((o) =>
+            o.characterName.trim().toUpperCase() === upperRole
+              ? { ...o, castingStatus: 'Cast' as const }
+              : o
+          )
+        : [...prevOverrides, { characterName: upperRole, castingStatus: 'Cast' as const }];
+
+      return {
+        ...proj,
+        characters: nextCharacters,
+        crewMembers: nextCrewMembers,
+        castingRoleOverrides: nextOverrides,
+        lastModified: 'Just now',
+      };
+    });
+    showToast(`Cast ${actorClean} as ${upperRole} & synced to Cast Book`);
+  };
+
+  const handleClearCastActorForRole = (characterName: string) => {
+    const upperRole = characterName.trim().toUpperCase();
+    updateCurrentProject((proj) => ({
+      ...proj,
+      characters: proj.characters.map((c) =>
+        c.name.trim().toUpperCase() === upperRole
+          ? { ...c, actor: undefined, status: undefined }
+          : c
+      ),
+      castingCandidates: (proj.castingCandidates || []).map((cand) =>
+        cand.characterName.trim().toUpperCase() === upperRole && cand.stage === 'Cast'
+          ? { ...cand, stage: 'Callback' }
+          : cand
+      ),
+      lastModified: 'Just now',
+    }));
+    showToast(`Released locked cast assignment for ${upperRole}`);
+  };
+
   const handleAddMealBreak = () => {
     const newMeal: StripboardStrip = {
       id: `meal-${Date.now()}`,
@@ -2465,7 +2631,7 @@ export default function App() {
 
   // Export handlers
   const handleExport = async (
-    format: 'pdf' | 'fdx' | 'fountain' | 'json' | 'csv' | 'rust_zip'
+    format: 'pdf' | 'fdx' | 'fountain' | 'srt' | 'vtt' | 'json' | 'csv' | 'rust_zip'
   ) => {
     if (format === 'rust_zip') {
       try {
@@ -2802,6 +2968,67 @@ export default function App() {
     showToast('Fountain script imported successfully!');
   };
 
+  const handleCreateProjectFromSubtitles = (newProject: StoryProject) => {
+    setProjects((prev) => [newProject, ...prev]);
+    setCurrentProjectId(newProject.id);
+    setSelectedSceneId(newProject.scenes[0]?.id || null);
+    setFocusedElementId(newProject.elements[0]?.id || null);
+    setActiveWorkspace('authoring');
+    showToast(
+      `Created screenplay "${newProject.title}" (${newProject.scenes.length} scene${
+        newProject.scenes.length === 1 ? '' : 's'
+      })`
+    );
+  };
+
+  const handleAppendSubtitlesToProject = (
+    targetProjectId: string,
+    cues: SubtitleCue[],
+    options: SubtitleToScriptOptions
+  ) => {
+    const target = projects.find((p) => p.id === targetProjectId);
+    if (!target) return;
+
+    const startNum = target.scenes.length + 1;
+    const built = buildScreenplayDataFromCues(cues, options, startNum);
+
+    setProjects((prev) =>
+      prev.map((p) => {
+        if (p.id !== targetProjectId) return p;
+
+        const existingCharMap = new Map(
+          p.characters.map((c) => [c.name.toUpperCase(), { ...c }])
+        );
+        built.characters.forEach((ch) => {
+          const key = ch.name.toUpperCase();
+          const prevChar = existingCharMap.get(key);
+          if (prevChar) {
+            prevChar.scenesCount += ch.scenesCount;
+            prevChar.speakingLines += ch.speakingLines;
+          } else {
+            existingCharMap.set(key, ch);
+          }
+        });
+
+        return {
+          ...p,
+          scenes: [...p.scenes, ...built.scenes],
+          elements: [...p.elements, ...built.elements],
+          strips: [...p.strips, ...built.strips],
+          characters: Array.from(existingCharMap.values()),
+          lastModified: 'Appended subtitles just now',
+        };
+      })
+    );
+    setCurrentProjectId(targetProjectId);
+    if (built.scenes[0]?.id) setSelectedSceneId(built.scenes[0].id);
+    if (built.elements[0]?.id) setFocusedElementId(built.elements[0].id);
+    setActiveWorkspace('authoring');
+    showToast(
+      `Appended ${built.scenes.length} scene(s) & ${built.elements.length} element(s) to "${target.title}"`
+    );
+  };
+
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-[#222222] text-gray-200 font-sans select-none print:h-auto print:w-auto print:overflow-visible print:bg-white print:text-black">
       {/* Google Maps Platform Quota Notice (Demo Key Case A) */}
@@ -2876,6 +3103,10 @@ export default function App() {
         onRecalculate={handleRecalculate}
         onAddDayBreak={handleAddDayBreak}
         onAddComment={() => handleAddComment('Review note added from menu')}
+        onOpenCastingStudio={() => {
+          setProductionRequestedTab({ tab: 'casting', nonce: Date.now() });
+          setActiveWorkspace('production');
+        }}
         onOpenCastCrew={() => {
           setProductionRequestedTab({ tab: 'cast_crew', nonce: Date.now() });
           setActiveWorkspace('production');
@@ -2902,6 +3133,10 @@ export default function App() {
           setHelpInitialCategory(category);
           setHelpInitialToolId(toolId);
           setIsHelpGuideOpen(true);
+        }}
+        onDownloadHelpPdf={() => {
+          const res = downloadHelpManualPdf();
+          showToast(`Downloaded ${res.filename} (${res.pageCount} pages)`);
         }}
         onSelectAll={handleSelectAllElements}
         onSelectScene={handleSelectSceneElements}
@@ -3216,6 +3451,12 @@ export default function App() {
                 onOpenNLEPipeline={() => setIsNLEPipelineOpen(true)}
                 onOpenReports={() => setIsReportsOpen(true)}
                 onNotify={showToast}
+                onCreateProjectFromSubtitles={handleCreateProjectFromSubtitles}
+                onAppendSubtitlesToProject={handleAppendSubtitlesToProject}
+                onUpdateCastingCandidates={handleUpdateCastingCandidates}
+                onUpdateCastingRoleOverrides={handleUpdateCastingRoleOverrides}
+                onCastActorToRole={handleCastActorToRole}
+                onClearCastActorForRole={handleClearCastActorForRole}
                 rightInspector={
                   <InspectorColumn
                     selectedScene={currentProject.scenes.find((s) => s.id === selectedSceneId)}
@@ -3356,6 +3597,17 @@ export default function App() {
             projects={projects}
             initialProjectId={currentProject.id}
             embedded={true}
+          />
+        )}
+
+        {/* Workspace 8: Subtitles Export, Importer & Screenplay Converter */}
+        {activeWorkspace === 'subtitles' && (
+          <SubtitlesWorkspace
+            projects={projects}
+            activeProject={currentProject}
+            onCreateProjectFromSubtitles={handleCreateProjectFromSubtitles}
+            onAppendSubtitlesToProject={handleAppendSubtitlesToProject}
+            onNotify={showToast}
           />
         )}
 

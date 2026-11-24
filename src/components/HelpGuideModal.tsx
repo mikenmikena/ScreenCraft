@@ -24,8 +24,12 @@ import {
   Circle,
   Sliders,
   StickyNote,
+  Download,
+  Captions,
+  GitPullRequest,
 } from 'lucide-react';
 import { ActiveWorkspace } from '../types/story';
+import { downloadHelpManualPdf } from '../utils/helpManualPdfGenerator';
 
 export type HelpSectionCategory =
   | 'all'
@@ -550,6 +554,67 @@ const TOOL_DOCS: ToolDocEntry[] = [
     onLaunch: (a) => a.onOpenExportModal(),
     closesModalOnLaunch: true,
   },
+  {
+    id: 'subtitles-studio',
+    category: 'export',
+    categoryLabel: 'Post & Export',
+    name: 'Subtitles Studio (.SRT / .VTT <-> Script)',
+    locationLabel: 'SUBTITLES Tab (next to Teleprompter) · Production → Subtitles',
+    summary:
+      'Export timed .SRT and .VTT subtitles directly from your screenplay, or import and edit existing subtitle files to convert them into full Screenplay documents.',
+    icon: <Captions className="w-4 h-4 text-cyan-300 shrink-0" />,
+    steps: [
+      {
+        title: 'Export .SRT or .VTT subtitles from your script',
+        detail:
+          'Choose a project and scene scope, pick SubRip (.srt) or WebVTT (.vtt), adjust WPM reading pace and line wrapping, then click Export .SRT / .VTT or Edit Cues in Editor.',
+      },
+      {
+        title: 'Import and edit subtitle cues',
+        detail:
+          'Switch to Subtitle Importer / Editor -> Screenplay to upload .srt, .vtt, .sbv, or timed .txt files, adjust start/end timecodes, assign speakers, and split, merge, or time-shift cues.',
+      },
+      {
+        title: 'Convert subtitles into a Screenplay Document',
+        detail:
+          'Configure scene gap detection and speaker prefix extraction, inspect the live screenplay preview, and click Create Screenplay Document to open the converted script in Authoring.',
+      },
+    ],
+    tips: [
+      'Bracketed captions such as [Door creaks open] automatically convert into Action blocks during screenplay conversion.',
+    ],
+    launchLabel: 'Open Subtitles Studio',
+    onLaunch: (a) => a.onSelectWorkspace('subtitles'),
+    closesModalOnLaunch: true,
+  },
+  {
+    id: 'collaboration-redlines',
+    category: 'review',
+    categoryLabel: 'Review & QC',
+    name: 'Collaboration & Non-Destructive Redlines',
+    locationLabel: 'COLLABORATION Tab',
+    summary:
+      'Collect outside contributor notes and proposed script changes outlined in each contributor’s assigned color without modifying the master screenplay until accepted.',
+    icon: <GitPullRequest className="w-4 h-4 text-pink-400 shrink-0" />,
+    steps: [
+      {
+        title: 'Assign color codes to team contributors',
+        detail:
+          'Add collaborators with unique highlight colors so every suggestion and note is visually attributable at a glance.',
+      },
+      {
+        title: 'Submit and review non-destructive suggestions',
+        detail:
+          'Compare original script lines against contributor-colored proposals, then click Accept Suggestion to commit to the script or Reject to dismiss.',
+      },
+    ],
+    tips: [
+      'Accepted collaboration edits automatically log in Revision History so they can still be audited or reverted later.',
+    ],
+    launchLabel: 'Open Collaboration Workspace',
+    onLaunch: (a) => a.onSelectWorkspace('collaboration'),
+    closesModalOnLaunch: true,
+  },
 ];
 
 const SHORTCUT_REFERENCE: {
@@ -603,6 +668,13 @@ export const HelpGuideModal: React.FC<HelpGuideModalProps> = ({
   const [exploredToolIds, setExploredToolIds] = useState<Record<string, boolean>>(() => ({
     [initialToolId || TOOL_DOCS[0].id]: true,
   }));
+  const [pdfStatus, setPdfStatus] = useState<string | null>(null);
+
+  const handleDownloadManualPdf = () => {
+    const res = downloadHelpManualPdf();
+    setPdfStatus(`Downloaded ${res.filename} (${res.pageCount} pages)`);
+    setTimeout(() => setPdfStatus(null), 5000);
+  };
 
   const filteredTools = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -664,8 +736,18 @@ export const HelpGuideModal: React.FC<HelpGuideModalProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-3 shrink-0">
-            <div className="relative w-64">
+          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+            <button
+              type="button"
+              onClick={handleDownloadManualPdf}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#ff7700] hover:bg-[#ff8c1a] text-black font-bold text-xs transition-colors whitespace-nowrap"
+              title="Download an illustrated multi-page PDF User Manual with Table of Contents, diagrams, step-by-step guides, and index"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Download Illustrated PDF Manual</span>
+            </button>
+
+            <div className="relative w-56">
               <Search className="w-3.5 h-3.5 text-gray-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 type="text"
@@ -696,6 +778,13 @@ export const HelpGuideModal: React.FC<HelpGuideModalProps> = ({
             </button>
           </div>
         </div>
+
+        {pdfStatus && (
+          <div className="px-5 py-2 bg-emerald-950/70 border-b border-emerald-700/60 text-emerald-200 text-xs flex items-center gap-2 shrink-0">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{pdfStatus} — includes Table of Contents, annotated UI diagrams, step-by-step guides, and clickable Index.</span>
+          </div>
+        )}
 
         {/* Category Filter Strip (wraps onto a second row when exceeding pane width) */}
         <div className="px-5 py-2 bg-[#1a1a1a] border-b border-[#323232] flex flex-wrap items-center gap-1.5 shrink-0">

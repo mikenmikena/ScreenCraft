@@ -15,6 +15,7 @@ import {
   FileCheck2,
   Code2,
   BookOpen,
+  Captions,
 } from 'lucide-react';
 import { NLEGeneratedSidecarEntry, StoryProject } from '../types/story';
 import {
@@ -22,6 +23,12 @@ import {
   exportToFinalDraftFdx,
   exportScheduleCsv,
 } from '../utils/screenplayParser';
+import {
+  DEFAULT_SCRIPT_TO_SUBTITLE_OPTIONS,
+  generateSubtitlesFromScript,
+  serializeCuesToSrt,
+  serializeCuesToVtt,
+} from '../utils/subtitleUtils';
 import {
   buildNLEMetadataDocument,
   createGeneratedSidecarEntry,
@@ -73,6 +80,20 @@ const FORMAT_ITEMS: {
     description: 'Plain-text industry screenwriting markup',
     extLabel: '.fountain',
     icon: <FileText className="w-4 h-4 text-emerald-400 shrink-0" />,
+  },
+  {
+    id: 'srt',
+    label: 'SubRip (.srt)',
+    description: 'Timecoded dialogue subtitles for NLE & video',
+    extLabel: '.srt',
+    icon: <Captions className="w-4 h-4 text-amber-300 shrink-0" />,
+  },
+  {
+    id: 'vtt',
+    label: 'WebVTT (.vtt)',
+    description: 'Web captions with <v Speaker> voice spans',
+    extLabel: '.vtt',
+    icon: <Captions className="w-4 h-4 text-cyan-300 shrink-0" />,
   },
   {
     id: 'csv',
@@ -196,6 +217,23 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       if (exportFormat === 'fountain') {
         const text = serializeToFountain(project);
         triggerDownload(text, `${safeTitle}.fountain`, 'text/plain');
+      } else if (exportFormat === 'srt') {
+        const cues = generateSubtitlesFromScript(project, {
+          ...DEFAULT_SCRIPT_TO_SUBTITLE_OPTIONS,
+          format: 'srt',
+        });
+        triggerDownload(serializeCuesToSrt(cues), `${safeTitle}.srt`, 'application/x-subrip');
+      } else if (exportFormat === 'vtt') {
+        const cues = generateSubtitlesFromScript(project, {
+          ...DEFAULT_SCRIPT_TO_SUBTITLE_OPTIONS,
+          format: 'vtt',
+        });
+        const vtt = serializeCuesToVtt(cues, {
+          title: project.title,
+          author: project.author,
+          useVoiceTags: true,
+        });
+        triggerDownload(vtt, `${safeTitle}.vtt`, 'text/vtt');
       } else if (exportFormat === 'fdx') {
         const fdx = exportToFinalDraftFdx(project, {
           includeSceneNumbers,
@@ -1000,6 +1038,10 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                           ? 'Final Draft XML (<FinalDraft>)'
                           : exportFormat === 'fountain'
                           ? 'Fountain Plain Text'
+                          : exportFormat === 'srt'
+                          ? 'SubRip Subtitles (.srt)'
+                          : exportFormat === 'vtt'
+                          ? 'WebVTT Subtitles (.vtt)'
                           : exportFormat === 'premiere_xml'
                           ? 'Premiere Pro XMEML v4'
                           : exportFormat === 'nle_json'

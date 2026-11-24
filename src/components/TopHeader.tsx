@@ -10,6 +10,7 @@ import {
   ListTree,
   GitPullRequest,
   MonitorPlay,
+  Captions,
 } from 'lucide-react';
 import { ActiveWorkspace } from '../types/story';
 import { BrandIcon } from './BrandIcon';
@@ -48,6 +49,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
       badge: pendingCollaborationCount,
     },
     { id: 'teleprompter', label: 'TELEPROMPTER', icon: <MonitorPlay className="w-3.5 h-3.5" /> },
+    { id: 'subtitles', label: 'SUBTITLES', icon: <Captions className="w-3.5 h-3.5" /> },
   ];
 
   return (

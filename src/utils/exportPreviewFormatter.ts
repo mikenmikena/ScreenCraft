@@ -5,11 +5,19 @@ import {
   serializeToFountain,
 } from './screenplayParser';
 import { buildNLEMetadataDocument, exportPremiereProXML } from './nleMetadataPipeline';
+import {
+  DEFAULT_SCRIPT_TO_SUBTITLE_OPTIONS,
+  generateSubtitlesFromScript,
+  serializeCuesToSrt,
+  serializeCuesToVtt,
+} from './subtitleUtils';
 
 export type ExportFormatType =
   | 'pdf'
   | 'fdx'
   | 'fountain'
+  | 'srt'
+  | 'vtt'
   | 'csv'
   | 'json'
   | 'premiere_xml'
@@ -433,6 +441,22 @@ export function buildExportPreview(
     });
   } else if (format === 'fountain') {
     rawSource = serializeToFountain(project);
+  } else if (format === 'srt') {
+    const cues = generateSubtitlesFromScript(project, {
+      ...DEFAULT_SCRIPT_TO_SUBTITLE_OPTIONS,
+      format: 'srt',
+    });
+    rawSource = serializeCuesToSrt(cues);
+  } else if (format === 'vtt') {
+    const cues = generateSubtitlesFromScript(project, {
+      ...DEFAULT_SCRIPT_TO_SUBTITLE_OPTIONS,
+      format: 'vtt',
+    });
+    rawSource = serializeCuesToVtt(cues, {
+      title: project.title,
+      author: project.author,
+      useVoiceTags: true,
+    });
   } else if (format === 'csv') {
     rawSource = exportScheduleCsv(project);
     csvRows = rawSource

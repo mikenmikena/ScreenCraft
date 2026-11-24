@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import {
   CastCrewMember,
+  CastingCandidate,
+  CastingRoleOverride,
   CharacterBreakdownOverride,
   CharacterRelationshipEdge,
   EquipmentItem,
@@ -15,11 +17,14 @@ import {
 } from '../types/story';
 import { StripboardView } from './StripboardView';
 import { CastCrewDirectory } from './CastCrewDirectory';
+import { CastingWorkspacePanel } from './CastingWorkspacePanel';
 import { LocationMapView } from './LocationMapView';
 import { EquipmentManifestPanel } from './EquipmentManifestPanel';
 import { ProductionBudgetPanel } from './ProductionBudgetPanel';
 import { StoryboardWorkspace } from './StoryboardWorkspace';
 import { TeleprompterWindow } from './TeleprompterWindow';
+import { SubtitlesWorkspace } from './SubtitlesWorkspace';
+import { SubtitleCue, SubtitleToScriptOptions } from '../utils/subtitleUtils';
 import {
   Layers,
   Users,
@@ -32,10 +37,12 @@ import {
   Compass,
   Camera,
   MonitorPlay,
+  Captions,
   Sparkles,
   RefreshCw,
   AudioWaveform,
   UserPlus,
+  UserCheck,
   Plus,
   Trash2,
   ArrowUpRight,
@@ -43,6 +50,7 @@ import {
 
 export type ProductionHubTab =
   | 'stripboard'
+  | 'casting'
   | 'cast_crew'
   | 'timeline'
   | 'location_map'
@@ -53,7 +61,8 @@ export type ProductionHubTab =
   | 'pitch'
   | 'research'
   | 'storyboards'
-  | 'teleprompter';
+  | 'teleprompter'
+  | 'subtitles';
 
 interface ProductionWorkspaceProps {
   projects: StoryProject[];
@@ -96,6 +105,27 @@ interface ProductionWorkspaceProps {
   onOpenNLEPipeline: () => void;
   onOpenReports: () => void;
   onNotify: (msg: string) => void;
+  onCreateProjectFromSubtitles?: (project: StoryProject) => void;
+  onAppendSubtitlesToProject?: (
+    targetProjectId: string,
+    cues: SubtitleCue[],
+    options: SubtitleToScriptOptions
+  ) => void;
+  onUpdateCastingCandidates?: (candidates: CastingCandidate[]) => void;
+  onUpdateCastingRoleOverrides?: (overrides: CastingRoleOverride[]) => void;
+  onCastActorToRole?: (
+    characterName: string,
+    candidate: {
+      actorName: string;
+      headshotUrl?: string;
+      agentOrRep?: string;
+      email?: string;
+      phone?: string;
+      unionStatus?: string;
+      dayRateEstimate?: number;
+    }
+  ) => void;
+  onClearCastActorForRole?: (characterName: string) => void;
   rightInspector?: React.ReactNode;
 }
 
@@ -163,6 +193,12 @@ export const ProductionWorkspace: React.FC<ProductionWorkspaceProps> = ({
   onOpenNLEPipeline,
   onOpenReports,
   onNotify,
+  onCreateProjectFromSubtitles,
+  onAppendSubtitlesToProject,
+  onUpdateCastingCandidates,
+  onUpdateCastingRoleOverrides,
+  onCastActorToRole,
+  onClearCastActorForRole,
   rightInspector,
 }) => {
   const [activeTab, setActiveTab] = useState<ProductionHubTab>('stripboard');
@@ -246,6 +282,12 @@ export const ProductionWorkspace: React.FC<ProductionWorkspaceProps> = ({
   }[] = [
     { id: 'stripboard', label: 'Stripboard & Schedule', icon: <Layers className="w-3.5 h-3.5" /> },
     {
+      id: 'casting',
+      label: 'Casting Studio',
+      icon: <UserCheck className="w-3.5 h-3.5" />,
+      count: project.characters.length,
+    },
+    {
       id: 'cast_crew',
       label: 'Cast & Crew Book',
       icon: <Users className="w-3.5 h-3.5" />,
@@ -286,6 +328,7 @@ export const ProductionWorkspace: React.FC<ProductionWorkspaceProps> = ({
       count: (project.storyboards || []).length,
     },
     { id: 'teleprompter', label: 'Teleprompter', icon: <MonitorPlay className="w-3.5 h-3.5" /> },
+    { id: 'subtitles', label: 'Subtitles', icon: <Captions className="w-3.5 h-3.5" /> },
   ];
 
   return (
@@ -426,6 +469,25 @@ export const ProductionWorkspace: React.FC<ProductionWorkspaceProps> = ({
             />
             {rightInspector}
           </>
+        )}
+
+        {activeTab === 'casting' && (
+          <CastingWorkspacePanel
+            project={project}
+            onUpdateCastingCandidates={(candidates) => onUpdateCastingCandidates?.(candidates)}
+            onUpdateCastingRoleOverrides={(overrides) =>
+              onUpdateCastingRoleOverrides?.(overrides)
+            }
+            onCastActorToRole={(characterName, candidate) =>
+              onCastActorToRole?.(characterName, candidate)
+            }
+            onClearCastActorForRole={(characterName) =>
+              onClearCastActorForRole?.(characterName)
+            }
+            onJumpToScene={onJumpToAuthoringScene}
+            onOpenCastRoster={() => setActiveTab('cast_crew')}
+            onNotify={onNotify}
+          />
         )}
 
         {(activeTab === 'cast_crew' || activeTab === 'timeline' || activeTab === 'call_sheet') && (
@@ -905,6 +967,19 @@ export const ProductionWorkspace: React.FC<ProductionWorkspaceProps> = ({
             projects={projects}
             initialProjectId={project.id}
             embedded={true}
+          />
+        )}
+
+        {activeTab === 'subtitles' && (
+          <SubtitlesWorkspace
+            projects={projects}
+            activeProject={project}
+            embedded={true}
+            onCreateProjectFromSubtitles={(newProj) => {
+              onCreateProjectFromSubtitles?.(newProj);
+            }}
+            onAppendSubtitlesToProject={onAppendSubtitlesToProject}
+            onNotify={onNotify}
           />
         )}
       </div>

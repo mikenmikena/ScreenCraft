@@ -146,7 +146,56 @@ export interface StoryCharacter {
   speakingLines: number;
   status?: string;
   image?: string;
+  referenceImages?: string[];
   description?: string;
+}
+
+export type CastingStage =
+  | 'Shortlist'
+  | 'Self-Tape'
+  | 'Callback'
+  | 'Chemistry Read'
+  | 'Offer Extended'
+  | 'Cast'
+  | 'Passed';
+
+export type CastingRolePriority =
+  | 'Lead'
+  | 'Principal'
+  | 'Day Player'
+  | 'Featured'
+  | 'Voice Only';
+
+export type CastingRoleStatus =
+  | 'Open / Uncast'
+  | 'Reviewing Tapes'
+  | 'Callbacks'
+  | 'Offer Out'
+  | 'Cast';
+
+export interface CastingCandidate {
+  id: string;
+  characterName: string;
+  actorName: string;
+  headshotUrl?: string;
+  agentOrRep?: string;
+  email?: string;
+  phone?: string;
+  unionStatus?: string;
+  stage: CastingStage;
+  rating: number; // 1-5
+  reelOrTapeLink?: string;
+  notes?: string;
+  dayRateEstimate?: number;
+  updatedAt: string;
+}
+
+export interface CastingRoleOverride {
+  characterName: string;
+  targetAgeRange?: string;
+  castingPriority?: CastingRolePriority;
+  castingStatus?: CastingRoleStatus;
+  castingSpecs?: string;
 }
 
 export type ShotType =
@@ -757,6 +806,8 @@ export interface StoryProject {
   financeSettings?: FinanceSettings;
   collaborators?: CollaboratorProfile[];
   collaboratorSuggestions?: CollaboratorSuggestion[];
+  castingCandidates?: CastingCandidate[];
+  castingRoleOverrides?: CastingRoleOverride[];
 }
 
 export type ActiveWorkspace =
@@ -767,6 +818,7 @@ export type ActiveWorkspace =
   | 'storyboard'
   | 'collaboration'
   | 'teleprompter'
+  | 'subtitles'
   | 'project_bible'
   | 'rust_engine'
   | 'projects';

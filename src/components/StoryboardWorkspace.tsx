@@ -21,11 +21,18 @@ import {
   ArrowRight,
   Upload,
   Grid,
-  Sliders
+  Sliders,
+  PanelRightOpen,
+  PanelRightClose,
+  BookOpen,
+  ArrowUpRight,
+  MessageSquare,
+  AlignLeft,
 } from 'lucide-react';
 import {
   StoryboardFrame,
   Scene,
+  ScreenplayElement,
   ShotType,
   CameraMovement,
   StoryProject
@@ -89,11 +96,82 @@ export const StoryboardWorkspace: React.FC<StoryboardWorkspaceProps> = ({
   const [editingFrame, setEditingFrame] = useState<StoryboardFrame | null>(null);
   const [isNewFrame, setIsNewFrame] = useState(false);
 
+  // Expand Scene Side-Pane Overlay State
+  const [expandedFrameId, setExpandedFrameId] = useState<string | null>(null);
+  const [sceneScriptFilter, setSceneScriptFilter] = useState<'all' | 'dialogue' | 'action'>('all');
+
   // Filtered frames
   const filteredFrames = storyboards.filter((frame) => {
     if (selectedSceneFilter === 'all') return true;
     return frame.sceneId === selectedSceneFilter;
   });
+
+  const expandedFrame =
+    (expandedFrameId &&
+      (filteredFrames.find((f) => f.id === expandedFrameId) ||
+        storyboards.find((f) => f.id === expandedFrameId))) ||
+    null;
+
+  const expandedScene = expandedFrame
+    ? scenes.find((s) => s.id === expandedFrame.sceneId) || null
+    : null;
+
+  const getSceneElementsForFrame = (frame: StoryboardFrame | null): ScreenplayElement[] => {
+    if (!frame) return [];
+    const bySceneId = project.elements.filter((el) => el.sceneId === frame.sceneId);
+    if (bySceneId.length > 0) return bySceneId;
+
+    const targetScene = scenes.find((s) => s.id === frame.sceneId);
+    if (!targetScene) return [];
+    const startIdx = project.elements.findIndex(
+      (el) =>
+        el.type === 'SCENE_HEADING' &&
+        el.text.trim().toUpperCase() === targetScene.heading.trim().toUpperCase()
+    );
+    if (startIdx < 0) return [];
+    const collected: ScreenplayElement[] = [project.elements[startIdx]];
+    for (let i = startIdx + 1; i < project.elements.length; i++) {
+      if (project.elements[i].type === 'SCENE_HEADING') break;
+      collected.push(project.elements[i]);
+    }
+    return collected;
+  };
+
+  const expandedSceneElements = getSceneElementsForFrame(expandedFrame);
+  const filteredExpandedElements = expandedSceneElements.filter((el) => {
+    if (sceneScriptFilter === 'dialogue') {
+      return (
+        el.type === 'CHARACTER' ||
+        el.type === 'PARENTHETICAL' ||
+        el.type === 'DIALOGUE' ||
+        el.type === 'VOICE_OVER'
+      );
+    }
+    if (sceneScriptFilter === 'action') {
+      return (
+        el.type === 'SCENE_HEADING' ||
+        el.type === 'ACTION' ||
+        el.type === 'SHOT' ||
+        el.type === 'GENERAL'
+      );
+    }
+    return true;
+  });
+
+  const toggleExpandSceneForFrame = (frameId: string) => {
+    setExpandedFrameId((prev) => (prev === frameId ? null : frameId));
+  };
+
+  const handleGlobalExpandSceneToggle = () => {
+    if (expandedFrame) {
+      setExpandedFrameId(null);
+      return;
+    }
+    const target = filteredFrames[0] || storyboards[0];
+    if (target) {
+      setExpandedFrameId(target.id);
+    }
+  };
 
   // Animatic timer
   useEffect(() => {
@@ -203,7 +281,7 @@ export const StoryboardWorkspace: React.FC<StoryboardWorkspaceProps> = ({
   };
 
   return (
-    <div className="flex-1 bg-[#1a1a1a] text-gray-200 overflow-y-auto flex flex-col select-none text-xs">
+    <div className="relative flex-1 bg-[#1a1a1a] text-gray-200 min-h-0 overflow-hidden flex flex-col select-none text-xs">
       {/* Storyboard Top Ribbon Bar */}
       <div className="bg-[#262626] border-b border-[#3e3e3e] px-4 py-2 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-3 min-w-0">
@@ -247,6 +325,7 @@ export const StoryboardWorkspace: React.FC<StoryboardWorkspaceProps> = ({
 
           {/* Rule of Thirds Toggle */}
           <button
+            type="button"
             onClick={() => setShowGridOverlay(!showGridOverlay)}
             className={`px-2 py-1 rounded border flex items-center space-x-1 transition-colors ${
               showGridOverlay
@@ -257,6 +336,26 @@ export const StoryboardWorkspace: React.FC<StoryboardWorkspaceProps> = ({
           >
             <Grid className="w-3 h-3" />
             <span>Thirds Grid</span>
+          </button>
+
+          {/* Expand Scene Side-Pane Toggle */}
+          <button
+            type="button"
+            onClick={handleGlobalExpandSceneToggle}
+            disabled={filteredFrames.length === 0 && storyboards.length === 0}
+            className={`px-2.5 py-1 rounded border flex items-center space-x-1.5 font-semibold transition-colors disabled:opacity-40 ${
+              expandedFrame
+                ? 'bg-[#3d2e1e] border-[#ff7700] text-amber-300'
+                : 'bg-[#222] border-[#3e3e3e] text-gray-300 hover:text-white'
+            }`}
+            title="Toggle Expand Scene side-pane overlay to inspect full screenplay dialogue & action"
+          >
+            {expandedFrame ? (
+              <PanelRightClose className="w-3.5 h-3.5 text-[#ff7700]" />
+            ) : (
+              <PanelRightOpen className="w-3.5 h-3.5 text-[#ff7700]" />
+            )}
+            <span>Expand Scene</span>
           </button>
         </div>
 
@@ -332,10 +431,16 @@ export const StoryboardWorkspace: React.FC<StoryboardWorkspaceProps> = ({
                   ? 'aspect-[4/3]'
                   : 'aspect-[16/9]';
 
+              const isExpanded = expandedFrame?.id === frame.id;
+
               return (
                 <div
                   key={frame.id}
-                  className="bg-[#242424] rounded-lg border border-[#3e3e3e] shadow-xl overflow-hidden flex flex-col transition-all hover:border-gray-500 group"
+                  className={`bg-[#242424] rounded-lg border shadow-xl overflow-hidden flex flex-col transition-all group ${
+                    isExpanded
+                      ? 'border-[#ff7700] ring-1 ring-[#ff7700]/60'
+                      : 'border-[#3e3e3e] hover:border-gray-500'
+                  }`}
                 >
                   {/* Card Header Bar */}
                   <div className="bg-[#1c1c1c] px-3 py-2 border-b border-[#333] flex items-center justify-between">
@@ -471,7 +576,7 @@ export const StoryboardWorkspace: React.FC<StoryboardWorkspaceProps> = ({
                     )}
 
                     {/* Camera Specs & Equipment Footer */}
-                    <div className="pt-2 border-t border-[#333] flex items-center justify-between text-[10px] text-gray-400">
+                    <div className="pt-2 border-t border-[#333] flex flex-wrap items-center justify-between gap-2 text-[10px] text-gray-400">
                       <div className="flex items-center space-x-2 font-mono">
                         <span className="text-purple-300 font-semibold">{frame.lens}</span>
                         <span>•</span>
@@ -481,16 +586,37 @@ export const StoryboardWorkspace: React.FC<StoryboardWorkspaceProps> = ({
                         </span>
                       </div>
 
-                      <button
-                        onClick={() => {
-                          setEditingFrame(frame);
-                          setIsNewFrame(false);
-                        }}
-                        className="text-amber-400 hover:text-amber-300 flex items-center space-x-1 font-semibold"
-                      >
-                        <Edit3 className="w-3 h-3" />
-                        <span>Edit Shot</span>
-                      </button>
+                      <div className="flex items-center gap-2.5">
+                        <button
+                          type="button"
+                          onClick={() => toggleExpandSceneForFrame(frame.id)}
+                          className={`flex items-center space-x-1 font-semibold px-2 py-0.5 rounded border transition-colors ${
+                            isExpanded
+                              ? 'bg-[#3d2e1e] border-[#ff7700] text-amber-300'
+                              : 'bg-[#1a1a1d] hover:bg-[#2d2d33] border-[#38383f] text-cyan-300 hover:text-cyan-200'
+                          }`}
+                          title="Expand full scene dialogue & action lines in side-pane overlay"
+                        >
+                          {isExpanded ? (
+                            <PanelRightClose className="w-3 h-3" />
+                          ) : (
+                            <PanelRightOpen className="w-3 h-3" />
+                          )}
+                          <span>{isExpanded ? 'Hide Scene' : 'Expand Scene'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingFrame(frame);
+                            setIsNewFrame(false);
+                          }}
+                          className="text-amber-400 hover:text-amber-300 flex items-center space-x-1 font-semibold"
+                        >
+                          <Edit3 className="w-3 h-3" />
+                          <span>Edit Shot</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -499,6 +625,280 @@ export const StoryboardWorkspace: React.FC<StoryboardWorkspaceProps> = ({
           </div>
         )}
       </div>
+
+      {/* Expand Scene Side-Pane Overlay */}
+      {expandedFrame && (
+        <aside
+          aria-label="Expanded Scene Screenplay Side-Pane"
+          className="absolute top-0 right-0 bottom-0 w-full sm:w-[440px] max-w-full z-30 bg-[#1a1a1e]/98 backdrop-blur-md border-l border-[#3e3e46] shadow-2xl flex flex-col"
+        >
+          {/* Side-Pane Header */}
+          <div className="px-4 py-3 bg-[#222227] border-b border-[#34343d] flex items-start justify-between gap-3 shrink-0">
+            <div className="min-w-0 space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="px-1.5 py-0.5 rounded bg-[#ff7700] text-black font-extrabold font-mono text-[10px]">
+                  SHOT {expandedFrame.shotNumber}
+                </span>
+                {expandedScene && (
+                  <span className="px-1.5 py-0.5 rounded bg-[#151518] border border-[#34343d] text-amber-300 font-mono text-[10px]">
+                    SCENE {expandedScene.sceneNumber}
+                  </span>
+                )}
+                <span className="text-[10px] text-gray-400 font-mono tabular-nums">
+                  {expandedScene?.pages ? `${expandedScene.pages} pp` : ''}
+                  {expandedScene?.timecode ? ` · ${expandedScene.timecode}` : ''}
+                </span>
+              </div>
+              <h3 className="text-xs font-bold text-gray-100 uppercase truncate">
+                {expandedScene?.heading || 'Unlinked Scene'}
+              </h3>
+            </div>
+
+            <div className="flex items-center gap-1 shrink-0">
+              {(() => {
+                const idx = filteredFrames.findIndex((f) => f.id === expandedFrame.id);
+                return (
+                  <>
+                    <button
+                      type="button"
+                      disabled={idx <= 0}
+                      onClick={() => idx > 0 && setExpandedFrameId(filteredFrames[idx - 1].id)}
+                      className="p-1 rounded bg-[#161619] hover:bg-[#2c2c33] border border-[#34343d] text-gray-300 disabled:opacity-35"
+                      title="Previous storyboard shot"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={idx < 0 || idx >= filteredFrames.length - 1}
+                      onClick={() =>
+                        idx >= 0 &&
+                        idx < filteredFrames.length - 1 &&
+                        setExpandedFrameId(filteredFrames[idx + 1].id)
+                      }
+                      className="p-1 rounded bg-[#161619] hover:bg-[#2c2c33] border border-[#34343d] text-gray-300 disabled:opacity-35"
+                      title="Next storyboard shot"
+                    >
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </>
+                );
+              })()}
+              <button
+                type="button"
+                onClick={() => setExpandedFrameId(null)}
+                className="p-1 rounded bg-[#161619] hover:bg-[#2c2c33] border border-[#34343d] text-gray-400 hover:text-white ml-1"
+                title="Close Expand Scene overlay"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Active Frame Mini-Context Strip */}
+          <div className="px-4 py-2.5 bg-[#151519] border-b border-[#2d2d35] flex items-center gap-3 shrink-0">
+            <div className="w-16 h-10 rounded overflow-hidden bg-black border border-[#34343c] flex items-center justify-center shrink-0">
+              {expandedFrame.imageUrl ? (
+                <img
+                  src={expandedFrame.imageUrl}
+                  alt={`Shot ${expandedFrame.shotNumber}`}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <Camera className="w-4 h-4 text-gray-600" />
+              )}
+            </div>
+            <div className="min-w-0 flex-1 space-y-0.5">
+              <div className="text-[11px] font-medium text-cyan-300 truncate">
+                {expandedFrame.shotType} · {expandedFrame.cameraMovement} ({expandedFrame.lens})
+              </div>
+              <p className="text-[11px] text-gray-400 truncate">
+                {expandedFrame.description || 'No frame action notes.'}
+              </p>
+            </div>
+          </div>
+
+          {/* Line Filter Controls */}
+          <div className="px-4 py-2 bg-[#1c1c21] border-b border-[#2e2e36] flex flex-wrap items-center justify-between gap-2 shrink-0">
+            <div className="flex flex-wrap items-center gap-1 p-0.5 bg-[#141417] border border-[#32323b] rounded">
+              <button
+                type="button"
+                onClick={() => setSceneScriptFilter('all')}
+                className={`px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1 transition-colors ${
+                  sceneScriptFilter === 'all'
+                    ? 'bg-[#2b2b33] text-[#ff8000] font-semibold'
+                    : 'text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                <BookOpen className="w-3 h-3" />
+                <span>All Lines ({expandedSceneElements.length})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSceneScriptFilter('dialogue')}
+                className={`px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1 transition-colors ${
+                  sceneScriptFilter === 'dialogue'
+                    ? 'bg-[#2b2b33] text-[#ff8000] font-semibold'
+                    : 'text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                <MessageSquare className="w-3 h-3" />
+                <span>Dialogue</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSceneScriptFilter('action')}
+                className={`px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1 transition-colors ${
+                  sceneScriptFilter === 'action'
+                    ? 'bg-[#2b2b33] text-[#ff8000] font-semibold'
+                    : 'text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                <AlignLeft className="w-3 h-3" />
+                <span>Action</span>
+              </button>
+            </div>
+
+            {expandedScene && (
+              <button
+                type="button"
+                onClick={() => onSelectScene(expandedScene.id)}
+                className="inline-flex items-center gap-1 text-[11px] text-amber-400 hover:text-amber-300 font-medium"
+              >
+                <span>Open in Script</span>
+                <ArrowUpRight className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+
+          {/* Scrollable Scene Screenplay Script Content */}
+          <div className="flex-1 overflow-y-auto px-5 py-4 space-y-2.5 select-text">
+            {filteredExpandedElements.length === 0 ? (
+              <div className="py-12 text-center text-gray-500 space-y-2">
+                <BookOpen className="w-8 h-8 mx-auto text-gray-600" />
+                <p className="text-xs font-medium text-gray-300">
+                  No matching screenplay elements in this scene
+                </p>
+                <p className="text-[11px] text-gray-500">
+                  Switch filters or add action/dialogue lines for this scene in the Authoring workspace.
+                </p>
+              </div>
+            ) : (
+              filteredExpandedElements.map((el) => {
+                const frameCueLower = (expandedFrame.dialogue || '').trim().toLowerCase();
+                const isCueMatch =
+                  Boolean(frameCueLower) &&
+                  frameCueLower.length >= 4 &&
+                  el.text.toLowerCase().includes(frameCueLower);
+
+                if (el.type === 'SCENE_HEADING') {
+                  return (
+                    <div
+                      key={el.id}
+                      className="bg-[#23232a] border-l-2 border-[#ff7700] px-3 py-1.5 rounded-r font-courier font-bold text-xs uppercase text-amber-300 tracking-wide"
+                    >
+                      {el.text}
+                    </div>
+                  );
+                }
+
+                if (el.type === 'CHARACTER') {
+                  const charRec = project.characters.find(
+                    (c) =>
+                      c.name.trim().toUpperCase() ===
+                      el.text.replace(/\(.*?\)/g, '').trim().toUpperCase()
+                  );
+                  return (
+                    <div
+                      key={el.id}
+                      className="pt-2 pl-16 font-courier font-bold text-xs uppercase text-gray-100 flex items-center gap-1.5"
+                    >
+                      {charRec && (
+                        <span
+                          className="w-2 h-2 rounded-full shrink-0"
+                          style={{ backgroundColor: charRec.color }}
+                        />
+                      )}
+                      <span>{el.text}</span>
+                    </div>
+                  );
+                }
+
+                if (el.type === 'PARENTHETICAL') {
+                  return (
+                    <div
+                      key={el.id}
+                      className="pl-12 pr-8 font-courier italic text-[11px] text-gray-400"
+                    >
+                      {el.text}
+                    </div>
+                  );
+                }
+
+                if (el.type === 'DIALOGUE' || el.type === 'VOICE_OVER') {
+                  return (
+                    <div
+                      key={el.id}
+                      className={`pl-8 pr-6 py-1 rounded font-courier text-xs leading-relaxed ${
+                        isCueMatch
+                          ? 'bg-[#352514] border border-[#ff7700]/60 text-amber-100'
+                          : 'text-gray-200'
+                      }`}
+                    >
+                      {el.type === 'VOICE_OVER' && (
+                        <span className="text-[10px] font-sans font-semibold text-cyan-300 mr-1.5">
+                          [V.O.]
+                        </span>
+                      )}
+                      <span>{el.text}</span>
+                      {isCueMatch && (
+                        <span className="ml-2 inline-block text-[9px] font-sans font-bold uppercase px-1.5 py-0.5 rounded bg-[#ff7700] text-black align-middle">
+                          Shot Cue
+                        </span>
+                      )}
+                    </div>
+                  );
+                }
+
+                if (el.type === 'TRANSITION') {
+                  return (
+                    <div
+                      key={el.id}
+                      className="text-right font-courier uppercase text-[11px] text-gray-400 font-semibold pt-1"
+                    >
+                      {el.text}
+                    </div>
+                  );
+                }
+
+                if (el.type === 'NOTE') {
+                  return (
+                    <div
+                      key={el.id}
+                      className="bg-amber-950/30 border border-amber-700/40 rounded px-3 py-1.5 text-[11px] text-amber-200 italic"
+                    >
+                      {el.text}
+                    </div>
+                  );
+                }
+
+                return (
+                  <p
+                    key={el.id}
+                    className={`font-courier text-xs leading-relaxed py-0.5 ${
+                      el.type === 'SHOT'
+                        ? 'text-cyan-300 font-semibold uppercase'
+                        : 'text-gray-300'
+                    }`}
+                  >
+                    {el.text}
+                  </p>
+                );
+              })
+            )}
+          </div>
+        </aside>
+      )}
 
       {/* Fullscreen Interactive Animatic Reel Player Modal */}
       {isPlayingAnimatic && filteredFrames.length > 0 && (
